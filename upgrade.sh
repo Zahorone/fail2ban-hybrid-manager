@@ -8,8 +8,6 @@ SCRIPT="fail2ban_hybrid-v0.7.3-COMPLETE.sh"
 
 # Aktuálna verzia
 CURRENT=$([[ -f "$VERSION_FILE" ]] && cat "$VERSION_FILE" || echo "0.0")
-
-# Najnovšia verzia
 LATEST=$(curl -s "$REPO/VERSION")
 
 echo "🔍 Current version: $CURRENT"
@@ -19,21 +17,13 @@ if [ "$CURRENT" = "$LATEST" ]; then
     echo "✅ Already up-to-date!"
 else
     echo "📥 Upgrading to $LATEST..."
-
-    # Backup starý
     cp "$INSTALL_PATH" "$INSTALL_PATH.backup"
-
-    # Stiahni nový
     curl -s "$REPO/$SCRIPT" > "$INSTALL_PATH"
     chmod +x "$INSTALL_PATH"
-
-    # Ulož verziu
     echo "$LATEST" > "$VERSION_FILE"
-
     echo "✅ Upgraded from $CURRENT to $LATEST"
 fi
 
-echo ""
 # Voliteľná synchronizácia filtrov
 read -p "🛡️  Chceš aktualizovať aj všetky custom Fail2Ban filtre z GitHubu? (y/n): " ANS
 if [[ "$ANS" =~ ^[Yy]$ ]]; then
@@ -55,6 +45,23 @@ if [[ "$ANS" =~ ^[Yy]$ ]]; then
         sudo mv "$filter" "$TARGET/$filter"
         echo "✅ $filter → $TARGET"
     done
+fi
+
+# Voliteľná inštalácia jail.local
+read -p "🔒  Chceš zaktualizovať jail.local z repozitára? (y/n): " JAIL
+if [[ "$JAIL" =~ ^[Yy]$ ]]; then
+    curl -s "$REPO/jail.local" > /tmp/jail.local
+    sudo mv /tmp/jail.local /etc/fail2ban/jail.local
+    echo "✅ jail.local zaktualizovaný"
+fi
+
+# Voliteľný NFTables update/setup
+read -p "💡  Chceš spustiť NFT ULTIMATE setup tool? (y/n): " NFT
+if [[ "$NFT" =~ ^[Yy]$ ]]; then
+    curl -s "$REPO/fail2ban_hybrid-ULTIMATE-setup-v0.7.3.sh" > /tmp/f2b-setup.sh
+    chmod +x /tmp/f2b-setup.sh
+    sudo bash /tmp/f2b-setup.sh
+    echo "✅ NFT setup/update dokončený"
 fi
 
 echo "💡 Run: source ~/.bashrc && f2b_audit"

@@ -44,6 +44,23 @@ if [[ "$ANS" =~ ^[Yy]$ ]]; then
     done
 fi
 
+# Voliteľná inštalácia jail.local
+read -p "🔒  Chceš nainštalovať jail.local z repozitára? (y/n): " JAIL
+if [[ "$JAIL" =~ ^[Yy]$ ]]; then
+    curl -s "$REPO/jail.local" > /tmp/jail.local
+    sudo mv /tmp/jail.local /etc/fail2ban/jail.local
+    echo "✅ jail.local nainštalovaný"
+fi
+
+# Voliteľný NFTables setup
+read -p "💡  Chceš spustiť ULTIMATE NFT setup tool? (y/n): " NFT
+if [[ "$NFT" =~ ^[Yy]$ ]]; then
+    curl -s "$REPO/fail2ban_hybrid-ULTIMATE-setup-v0.7.3.sh" > /tmp/f2b-setup.sh
+    chmod +x /tmp/f2b-setup.sh
+    sudo bash /tmp/f2b-setup.sh
+    echo "✅ NFT setup dokončený"
+fi
+
 source ~/.bashrc
 echo "🎉 Installation complete!"
 
