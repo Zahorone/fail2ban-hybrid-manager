@@ -1,30 +1,75 @@
+```text
 # fail2ban-hybrid-manager
 
-**Hybridný manažment pre Fail2Ban, nftables, UFW a automatizované opravy/migrácie**  
-Verzia: **0.7.3**  
-Autor: Peter Bakic ([zahor@tuta.io](mailto:zahor@tuta.io))
+**Hybridná správa Fail2Ban, nftables/UFW a automatizované filtre, plne automatizované pre moderné server infraštruktúry.**
 
-## Funkcie:
+---
 
-- Plná automatizácia synchronizácie Fail2Ban ↔️ nftables/UFW
-- Jedným príkazom audit, repair, forced orphaned unban
-- Skripty na repair databázy, firewall sets, incremental bany
-- Podporuje cron, notifikácie a repair kit pre administrátorov
+## 🚀 Rýchla inštalácia
 
-## Základné skripty
+Nainštaluješ všetko jedným príkazom (tool aj voliteľne custom filtre):
+```
+curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/install.sh | bash
 
-- `fail2ban_hybrid-v0.7.3-COMPLETE.sh` — hlavný audoit/repair tool
-- `fail2ban_hybrid-ULTIMATE-setup-v0.7.3.sh` — setup/auto-install
-- `repair-all-v0.7.3.sh`, `repair-failban-v0.7.3.sh`, `repair-nftables-v0.7.3.sh` — špecifické opravy
+```text
 
-## Rýchla inštalácia (do `/usr/local/bin/f2b`)
+- Skript automaticky stiahne hlavný tool do `/usr/local/bin/f2b`
+- Pridá alias do tvojho shellu (`source /usr/local/bin/f2b`)
+- Po inštalácii si môžeš zvoliť či chceš zároveň nainštalovať všetky custom regex filter .conf súbory do `/etc/fail2ban/filter.d/`  
+  (odporúčané pre komplet funkčnú konfiguráciu)
 
-## Rýchla inštalácia (do `/usr/local/bin/f2b`)
+---
 
-curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/fail2ban_hybrid-v0.7.3-COMPLETE.sh > /usr/local/bin/f2b
-chmod +x /usr/local/bin/f2b
-source /usr/local/bin/f2b
+## 🔄 Upgrade na najnovšiu verziu
 
-text
+Ako admin stačí spustiť:
+```
+curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/upgrade.sh | bash
 
-## Viac info a detailné návody doplníme do `/docs` sekcie
+```text
+
+- Skript automaticky uloží backup starého toolu
+- Stiahne najnovšiu verziu podľa repa
+- Voliteľne synchronizuje/zaktualizuje všetky custom fail2ban filtre z GitHubu
+
+---
+
+## 🔧 Obnoviteľné filtre
+
+Všetky pokročilé filtre máš pod adresárom `filters/`.  
+Pre ručnú inštaláciu (ak by bolo treba len jeden filter):
+```
+sudo cp filters/nginx-npm-4xx.conf /etc/fail2ban/filter.d/
+sudo cp filters/recidive.conf /etc/fail2ban/filter.d/
+
+...atď pre každý filter
+```text
+
+---
+
+## 📁 Hlavné skripty v repozitári
+
+- `fail2ban_hybrid-v0.7.3-COMPLETE.sh` – hlavný tool (audit, repair, sync, hybrid management)
+- `fail2ban_hybrid-ULTIMATE-setup-v0.7.3.sh` – setup/inicializácia systémov
+- `repair-all-v0.7.3.sh`, `repair-failban-v0.7.3.sh`, `repair-nftables-v0.7.3.sh` – opravné utility
+- `install.sh` – inštalácia toolu a filtrov
+- `upgrade.sh` – upgrade toolu a filtrov
+- `filters/` – kompletná knižnica tvojich produktívnych custom fail2ban filtrov
+
+---
+
+## ❗ Odporúčanie pre adminov
+
+Aktualizuj repo vždy keď meníš regex, logiku, alebo prichádzajú nové typy útokov.  
+Každý server obnovíš najnovším toolom + všetky filtry do pár sekúnd = žiadny human error v pravidlách.
+
+---
+
+**Správca repa:**  
+Peter Bakic (Zahorone)  
+Contact: zahor@tuta.io
+
+---
+
+## ✨ Changelog, detailná dokumentácia a príklad použitia nájdeš v sekcii /docs (pridávame priebežne).
+```
