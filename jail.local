@@ -218,26 +218,43 @@ unbanaction = ufw
 banaction_allports = ufw
 action = %(action_)s
 
+
 # --------[nginx-recon]-----------------------------------------------
-# Ochrana pred recon/scan requestami (admin/backup endpointy)
-# Ban pri 5 chybných pokusoch za 30 minút cez UFW
-# recon = reconnaissance = skenovanie slabých miest
-# Typické endpointy: /admin, /backup, /.git, /web.config, atď.
-# Zostáva na UFW kvôli non-Docker Nginx inštanciám
+# KRITICKÁ OCHRANA: Detekcia reconnaissance/scan requestov
+# Matchuje prístupy k sensitive files a config súborom:
+# - .env, .git, .npmrc, composer.lock, package-lock.json
+# - .bak, .backup, .old, .sql, dump.sql, database.sql
+# - .DS_Store, .htaccess (root level)
+# - phpinfo.php, info.php, test.php
+# - wp-admin, wp-login, wp-config.php
+# - shell.php, cmd.php, backdoor.php
+# - /backup/, /dump/, /private/, /secret/
+# 
+# OPTIMALIZOVANÉ: Ignoruje legitímne /index.php/* requesty
+# Ban pri 3 pokusoch za 5 minút s incrementom až na 7 dní
 # ------------------------------------------------------------------
 [nginx-recon]
 enabled = true
 port = 80,443
 filter = nginx-recon
-backend = auto
+backend = polling
+polltime = 5
 logpath = /opt/rustnpm/data/logs/fallback_access.log
           /opt/rustnpm/data/logs/proxy-host-*_access.log
-maxretry = 5
-bantime = 86400           
-findtime = 1800           
+# Prísne: 3 pokusy o sensitive file access = ban
+maxretry = 3
+bantime = 86400            # 1 deň inicialny ban
+findtime = 300             # 5 minút window
+# Increment: opakované pokusy = dlhší ban
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 604800   # Max 7 dní
+bantime.overalljails = true
+# nftables pre Docker/NPM traffic
 banaction = nftables-multiport[name=nginx-recon, port="80,443"]
 unbanaction = nftables-multiport[name=nginx-recon, port="80,443", actiontype=unban]
 action = %(action_mwl)s
+
 # --------[manualblock]-----------------------------------------------
 # Manuálny jail pre ručné blokovanie specific IP
 # Perma-ban (bantime = -1) podľa logpath (manualblock.log)
