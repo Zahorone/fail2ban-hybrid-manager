@@ -1,4 +1,4 @@
-```text
+
 # fail2ban-hybrid-manager
 
 **Hybridná správa Fail2Ban, nftables/UFW a automatizované filtre, plne automatizované pre moderné server infraštruktúry.**
@@ -8,10 +8,9 @@
 ## 🚀 Rýchla inštalácia
 
 Nainštaluješ všetko jedným príkazom (tool aj voliteľne custom filtre):
-```
+```bash
 curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/install.sh | bash
-
-```text
+```
 
 - Skript automaticky stiahne hlavný tool do `/usr/local/bin/f2b`
 - Pridá alias do tvojho shellu (`source /usr/local/bin/f2b`)
@@ -23,10 +22,9 @@ curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/mai
 ## 🔄 Upgrade na najnovšiu verziu
 
 Ako admin stačí spustiť:
-```
+```bash
 curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/upgrade.sh | bash
-
-```text
+```
 
 - Skript automaticky uloží backup starého toolu
 - Stiahne najnovšiu verziu podľa repa
@@ -38,12 +36,12 @@ curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/mai
 
 Všetky pokročilé filtre máš pod adresárom `filters/`.  
 Pre ručnú inštaláciu (ak by bolo treba len jeden filter):
-```
+```bash
 sudo cp filters/nginx-npm-4xx.conf /etc/fail2ban/filter.d/
 sudo cp filters/recidive.conf /etc/fail2ban/filter.d/
-
+```
 ...atď pre každý filter
-```text
+
 # Fail2Ban – Custom NGINX Proxy Manager Recon Filter (EasyAppointments Edition)
 
 Tento filter je optimalizovaný pre log formát generovaný Nginx Proxy Managerom (Docker proxy-host logy).
@@ -83,5 +81,5 @@ Contact: zahor@tuta.io
 ---
 
 ## ✨ Changelog, detailná dokumentácia a príklad použitia nájdeš v sekcii /docs (pridávame priebežne).
-### f2b_ufw_banned – ukáž aktuálnych UFW/Fail2Ban banov
-```
+#### f2b_ufw_banned – ukáž aktuálnych UFW/Fail2Ban banov
+
