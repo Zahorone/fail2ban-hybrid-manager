@@ -83,4 +83,5 @@ Contact: zahor@tuta.io
 ---
 
 ## ✨ Changelog, detailná dokumentácia a príklad použitia nájdeš v sekcii /docs (pridávame priebežne).
+### f2b_ufw_banned – ukáž aktuálnych UFW/Fail2Ban banov
 ```
