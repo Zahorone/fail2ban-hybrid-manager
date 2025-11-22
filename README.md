@@ -44,7 +44,18 @@ sudo cp filters/recidive.conf /etc/fail2ban/filter.d/
 
 ...atď pre každý filter
 ```text
+# Fail2Ban – Custom NGINX Proxy Manager Recon Filter (EasyAppointments Edition)
 
+Tento filter je optimalizovaný pre log formát generovaný Nginx Proxy Managerom (Docker proxy-host logy).
+Všetky legitímne cesty EasyAppointments (login, calendar, booking, assets, špeciálne endpointy) sú whitelisted v `.local` súbore – jednoducho upraviteľné podľa potreby.
+
+## Použitie
+
+- **nginx-recon.conf** – obsahuje failregex detekujúci skutočné recon/scanner útoky (.env, .git, shell.php, admin cesty...)
+- **nginx-recon.local** – obsahuje ignoreregex pre whitelisting všetkých legitímnych requestov EasyAppointments (stačí upraviť tu, nie v .conf!)
+- Log formát: `[Date] - Code - METHOD SCHEME DOMAIN "PATH" [Client IP] ...`
+
+**Ak chceš whitelistiť ďalšie cesty, urob to priamo v `nginx-recon.local`.**
 ---
 
 ## 📁 Hlavné skripty v repozitári
