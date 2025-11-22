@@ -595,6 +595,20 @@ f2b_ufw_list() {
     sudo ufw status | grep -E "^[0-9]" || log_info "No UFW rules found"
 }
 
+f2b_ufw_banned() {
+    echo "🛡️ UFW ACTIVE FAIL2BAN BANS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    local count
+    count=$(sudo ufw status | grep -c '# by Fail2Ban')
+    echo "Aktuálnych IP zabanovaných cez UFW/Fail2Ban: $count"
+    if [ "$count" -gt 0 ]; then
+        echo
+        # Vypíš iba IP adresy, žiadne prázdne riadky
+        sudo ufw status | grep '# by Fail2Ban' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+    fi
+}
+
+
 # ============================================================
 # EXTENDED: MANAGEMENT
 # ============================================================
@@ -686,6 +700,7 @@ UFW:
   f2b_ufw            - Zobraz UFW status
   f2b_ufw_count      - Počet UFW pravidiel
   f2b_ufw_list       - Vypíš všetky UFW pravidlá
+  f2b_ufw_banned     - Počet a IP zabanovaných cez UFW/Fail2Ban
 
 Management:
   f2b_status         - Fail2Ban status
@@ -807,6 +822,9 @@ cli_parse() {
             ;;
         f2b-ufw-list|f2b_ufw_list|ufw-list)
             f2b_ufw_list "$@"
+            ;;
+        f2b-ufw-banned|f2b_ufw_banned|ufw-banned)
+            f2b_ufw_banned "$@"
             ;;
         
         # MANAGEMENT
