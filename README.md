@@ -1,85 +1,51 @@
+# Fail2Ban Hybrid Manager
 
-# fail2ban-hybrid-manager
+## Releases
 
-**Hybridná správa Fail2Ban, nftables/UFW a automatizované filtre, plne automatizované pre moderné server infraštruktúry.**
+- **[Latest Stable Release: v0.8](releases/v0.8/)**  
+  Production-ready, optimized, idempotent setup (recommended for all new installations and upgrades).
+- **[Legacy Release: v0.7.3](releases/v0.7.3/)**  
+  For recovery, migration, or reference only. Use for rollback/compatibility if needed.
 
----
+## Directory Structure
 
-## 🚀 Rýchla inštalácia
+- `releases/v0.8/` — All scripts, documentation and configs for version 0.8 and above
+- `releases/v0.7.3/` — Archive/legacy scripts, configs, old jail/filter files and recovery/upgrade tools for v0.7.3
+- `.gitignore` — Project ignore rules (recommended: ignore .DS_Store, temp files)
+- `README.md` — Main project navigation and quick start
 
-Nainštaluješ všetko jedným príkazom (tool aj voliteľne custom filtre):
+## Quick Start
+
+For a new installation or upgrade from older version:
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/install.sh | bash
+cd releases/v0.8
+sudo bash fail2ban_v0.8-setup-final.sh
+source ~/.bashrc # Enable CLI aliases
+sudo fail2ban-client status
 ```
 
-- Skript automaticky stiahne hlavný tool do `/usr/local/bin/f2b`
-- Pridá alias do tvojho shellu (`source /usr/local/bin/f2b`)
-- Po inštalácii si môžeš zvoliť či chceš zároveň nainštalovať všetky custom regex filter .conf súbory do `/etc/fail2ban/filter.d/`  
-  (odporúčané pre komplet funkčnú konfiguráciu)
+For migration/rollback or reference:
+- See [docs/MIGRATION.md](releases/v0.8/docs/MIGRATION.md)
+- For legacy rescue tools or configs, see [releases/v0.7.3/](releases/v0.7.3/)
+
+## Documentation
+
+- [v0.8 Migration Guide](releases/v0.8/docs/MIGRATION.md)
+- [v0.8 Features Guide](releases/v0.8/docs/FEATURES.md)
+- Release guides, troubleshooting, performance metrics all available in `releases/v0.8/docs/`
+
+## Best Practice
+
+- Use the latest stable release at all times.
+- Refer to legacy archive only for specific recovery/migration needs.
+- All change history and previous versions are traceable in releases/ subdirectories and tags.
+- For troubleshooting/support, open a GitHub issue or discussion.
 
 ---
 
-## 🔄 Upgrade na najnovšiu verziu
-
-Ako admin stačí spustiť:
-```bash
-curl -sSL https://raw.githubusercontent.com/Zahorone/fail2ban-hybrid-manager/main/upgrade.sh | bash
-```
-
-- Skript automaticky uloží backup starého toolu
-- Stiahne najnovšiu verziu podľa repa
-- Voliteľne synchronizuje/zaktualizuje všetky custom fail2ban filtre z GitHubu
-
----
-
-## 🔧 Obnoviteľné filtre
-
-Všetky pokročilé filtre máš pod adresárom `filters/`.  
-Pre ručnú inštaláciu (ak by bolo treba len jeden filter):
-```bash
-sudo cp filters/nginx-npm-4xx.conf /etc/fail2ban/filter.d/
-sudo cp filters/recidive.conf /etc/fail2ban/filter.d/
-```
-...atď pre každý filter
-
-# Fail2Ban – Custom NGINX Proxy Manager Recon Filter (EasyAppointments Edition)
-
-Tento filter je optimalizovaný pre log formát generovaný Nginx Proxy Managerom (Docker proxy-host logy).
-Všetky legitímne cesty EasyAppointments (login, calendar, booking, assets, špeciálne endpointy) sú whitelisted v `.local` súbore – jednoducho upraviteľné podľa potreby.
-
-## Použitie
-
-- **nginx-recon.conf** – obsahuje failregex detekujúci skutočné recon/scanner útoky (.env, .git, shell.php, admin cesty...)
-- **nginx-recon.local** – obsahuje ignoreregex pre whitelisting všetkých legitímnych requestov EasyAppointments (stačí upraviť tu, nie v .conf!)
-- Log formát: `[Date] - Code - METHOD SCHEME DOMAIN "PATH" [Client IP] ...`
-
-**Ak chceš whitelistiť ďalšie cesty, urob to priamo v `nginx-recon.local`.**
----
-
-## 📁 Hlavné skripty v repozitári
-
-- `fail2ban_hybrid-v0.7.3-COMPLETE.sh` – hlavný tool (audit, repair, sync, hybrid management)
-- `fail2ban_hybrid-ULTIMATE-setup-v0.7.3.sh` – setup/inicializácia systémov
-- `repair-all-v0.7.3.sh`, `repair-failban-v0.7.3.sh`, `repair-nftables-v0.7.3.sh` – opravné utility
-- `install.sh` – inštalácia toolu a filtrov
-- `upgrade.sh` – upgrade toolu a filtrov
-- `filters/` – kompletná knižnica tvojich produktívnych custom fail2ban filtrov
-
----
-
-## ❗ Odporúčanie pre adminov
-
-Aktualizuj repo vždy keď meníš regex, logiku, alebo prichádzajú nové typy útokov.  
-Každý server obnovíš najnovším toolom + všetky filtry do pár sekúnd = žiadny human error v pravidlách.
-
----
-
-**Správca repa:**  
-Peter Bakic (Zahorone)  
-Contact: zahor@tuta.io
-
----
-
-## ✨ Changelog, detailná dokumentácia a príklad použitia nájdeš v sekcii /docs (pridávame priebežne).
-#### f2b_ufw_banned – ukáž aktuálnych UFW/Fail2Ban banov
+**Note:**  
+This repository is regularly cleaned and release-structured for clarity and maintainability.  
+Legacy configs/scripts reside only in their dedicated archive/release folders.  
+If you need help or want to contribute, open an issue or pull request!
 
