@@ -28,9 +28,34 @@
 
 set -e
 
-# ============================================================
-# GLOBAL CONFIG
-# ============================================================
+# ==========================
+# GLOBAL CONFIG CLEANUP LEGACY NFT & UFW
+# ==========================
+
+log_header "LEGACY CLEANUP: Removing old nftables tables and Fail2Ban UFW bans"
+
+# NFTABLES legacy table
+if sudo nft list tables | grep -q "f2b-table"; then
+    log_warn "Legacy nftables table 'f2b-table' detected, removing..."
+    sudo nft delete table inet f2b-table
+    log_info "Legacy table 'f2b-table' deleted."
+else
+    log_debug "No legacy nftables table 'f2b-table' found."
+fi
+
+# UFW Fail2Ban bans cleanup
+if sudo ufw status numbered | grep -q "by Fail2Ban"; then
+    log_warn "Fail2Ban bans detected in UFW, auto-cleaning..."
+    sudo ufw status numbered | grep "by Fail2Ban" | \
+      awk -F'[][]' '{print $2}' | sort -nr | \
+      while read RULE; do
+        log_warn "Deleting Fail2Ban rule #$RULE from UFW..."
+        sudo ufw delete $RULE
+      done
+    log_info "All Fail2Ban bans in UFW deleted. Custom rules untouched."
+else
+    log_debug "No Fail2Ban UFW bans found. Nothing to delete."
+fi
 
 VERSION="0.8-IDEMPOTENT+CLI"
 SETUP_DATE="2025-11-23"
