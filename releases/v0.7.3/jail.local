@@ -1,0 +1,382 @@
+# =====================================================================
+# FAIL2BAN HYBRID CONFIGURATION - jail.local FINAL FIXED v1.0
+# Kompletná konfigurácia Fail2Ban s nftables + UFW integráciou
+# Všetky jaily so SPRÁVNYM banaction + unbanaction!
+# =====================================================================
+
+# =================================================================
+# [DEFAULT] - Globálne nastavenia a dedičné parametre pre všetky jaily
+# - Predvolené časy, porty a whitelist (ignoreip)
+# - Emailové notifikácie pre bannuty traffic/events
+# - UFW pre systémové/SSH bany, nftables pre Docker/NPM
+# =================================================================
+[DEFAULT]
+# Predvolené mail nastavenia
+destemail = zahor@tuta.io
+sender = fail2ban@terminy.bakic.net
+sendername = TermFail2Ban terminy.bakic.net
+
+# Akcie - defaultne UFW pre systém
+banaction = ufw
+# NOVINKA: Unbanaction! Keď bantime vypršal, Fail2Ban automaticky vymaže z UFW/nftables
+unbanaction = ufw
+banaction_allports = ufw
+allowipv6 = auto
+
+# Email akcia - poslať správu pri bane
+action = %(action_mwl)s
+
+# IP whitelist (ignorovať)
+# - 127.0.0.1/8 = localhost
+# - ::1 = IPv6 localhost
+# - 192.168.1.0/24 = lokálna sieť
+# - 172.17.0.0/16, 172.18.0.0/16 = Docker siete
+# - 188.121.168.64 = admin IP (tvoja)
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16 188.121.168.64
+
+# Predvolené časy (pre všetky jaily)
+# - findtime = čas v sekundách, počas ktorého sa počítajú pokusy
+# - bantime = ako dlho ban trvá (v sekundách)
+# - maxretry = koľko pokusov pred banom
+findtime = 600              
+bantime = 3600              
+maxretry = 5
+
+# =================================================================
+# NFTABLES JAILY (Docker/NPM/HTTP traffic)
+# Používajú nftables-multiport pre vysoký výkon a sets
+# DÔLEŽITÉ: Majú banaction + unbanaction!
+# =================================================================
+
+# --------[npm-iot-exploit]-----------------------------------------
+# Detekcia pokusov o prienik cez typické IoT/exploit endpointy
+# Dočasný ban (7 dní) - pokusy sa opakujú, ale IP sa môžu vrátiť
+# Typické endpointy: /admin, /api, /config, atď.
+# ------------------------------------------------------------------
+[npm-iot-exploit]
+enabled = true
+port = 80,443
+filter = npm-iot-exploit
+backend = polling
+logpath = /opt/rustnpm/data/logs/*_access.log
+maxretry = 1
+bantime = 604800           
+findtime = 60
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=npm-iot-exploit, port="80,443"]
+unbanaction = nftables-multiport[name=npm-iot-exploit, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[npm-fasthttp]---------------------------------------------
+# Ochrana pred pokusmi/scanmi s User-Agentom „fasthttp/bot"
+# Ban na 30 dní pri každom detekovanom requeste
+# fasthttp = rýchly bot, zvyčajne malware/scanner
+# ------------------------------------------------------------------
+[npm-fasthttp]
+enabled = true
+port = 80,443
+filter = npm-fasthttp
+backend = polling   
+logpath = /opt/rustnpm/data/logs/*_access.log
+maxretry = 1
+bantime = 2592000         
+findtime = 60
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=npm-fasthttp, port="80,443"]
+unbanaction = nftables-multiport[name=npm-fasthttp, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[nginx-444]------------------------------------------------
+# Okamžitá ochrana proti útokom vracajúcim 444 (connection closed)
+# Typicky automatizované scannery, exploity, botnet requesty
+# 444 = Nginx vrátilo zatvárací signál (iný ako štandardné)
+# Perma-ban (bantime = -1) pri 3 pokusoch za 60s
+# ------------------------------------------------------------------
+[nginx-444]
+enabled = true
+port = 80,443
+filter = nginx-444
+backend = polling
+polltime = 5
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+maxretry = 3
+bantime = -1              
+findtime = 60
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=nginx-444, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-444, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[nginx-4xx]-------------------------------------------------
+# Kritická ochrana proti útokom a scanom na Nginx HTTP/HTTPS
+# Deteguje ako rýchle bursts (12 errorov/60s) tak pomalšie vlny (6 errorov/10min)
+# 4xx = clientské chyby (404, 403, 401, 429 rate limit, atď.)
+# 
+# Dynamické zvyšovanie bantime pri opakovaných útokoch (exponenciálny rast):
+# - 1. útok: ban na 30 minút
+# - 2. útok: ban na 60 minút (2x)
+# - 3. útok: ban na 120 minút (2x)
+# - ... až do maxima 7 dní
+# 
+# bantime.overalljails = true = recidive efekt - účítajú sa všetky jaily
+# Multiport ban cez nftables (vysoký výkon)
+# ------------------------------------------------------------------
+[nginx-4xx]
+enabled = true
+port = 80,443
+filter = nginx-npm-4xx 
+backend = polling
+polltime = 5
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+# Detekcia: 6 errorov za 10 minút (polápaný útok)
+maxretry = 6  
+findtime = 600
+# Iniciálny ban: 30 minút
+bantime = 1800
+# Dynamické zvýšenie pri opakovaní
+bantime.increment = true
+bantime.factor = 2           
+bantime.maxtime = 604800     
+bantime.overalljails = true 
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=nginx-4xx, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-4xx, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[nginx-limit-req]-------------------------------------------
+# Ochrana pred porušením Nginx rate limitu (limit_req_zone)
+# Deteguje prekročenie povoleného počtu requestov/sekundu
+# Ban pri 2 porušeniach za 60s s incrementom (exponenciálny rast)
+# Typické limity: 10 req/s, 1 req/s pre sensitive endpointy
+# ------------------------------------------------------------------
+[nginx-limit-req]
+enabled = true
+port = 80,443
+filter = nginx-limit-req
+backend = polling
+logpath = /opt/rustnpm/data/logs/proxy-host-*_error.log
+          /opt/rustnpm/data/logs/fallback_error.log
+maxretry = 2
+bantime = 1800            
+findtime = 60
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 86400    
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=nginx-limit-req, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-limit-req, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[recidive]--------------------------------------------------
+# Jail pre recidivujúcich (opakovaných) útočníkov
+# Ak bola IP banovaná viac ako 5x, ban na 7 dní globálne
+# Monitoruje /var/log/fail2ban.log a deteguje opakované bany
+# Sleduje všetky jaily cez bantime.overalljails
+# ------------------------------------------------------------------
+[recidive]
+enabled = true
+filter = recidive
+logpath = /var/log/fail2ban.log
+maxretry = 5              
+bantime = 604800          
+findtime = 86400          
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=recidive, port="0:65535"]
+unbanaction = nftables-multiport[name=recidive, port="0:65535", actiontype=unban]
+action = %(action_mwl)s
+
+# =================================================================
+# UFW JAILY (Systémové služby a non-Docker traffic)
+# Používajú UFW pre jednoduchšiu správu systémových portov
+# UFW = Uncomplicated Firewall, ľahšie na správu ako nftables
+# =================================================================
+
+# --------[sshd]------------------------------------------------------
+# Systémová ochrana proti bruteforce SSH (port 2222)
+# Ban po 2 chybných pokusoch cez UFW, increment až na 7 dní
+# sshd = Secure Shell Daemon = SSH server
+# Port 2222 = custom SSH port (nie 22, aby sa vyhol skripty)
+# ------------------------------------------------------------------
+[sshd]
+enabled = true
+port = 2222
+filter = sshd
+backend = auto
+logpath = /var/log/auth.log
+maxretry = 2
+bantime = 86400            
+findtime = 900            
+# Exponenciálny rast: 1. ban = 1 deň, 2. ban = 3 dni, 3. ban = 9 dní, max = 7 dní
+bantime.increment = true
+bantime.factor = 3
+bantime.maxtime = 604800
+banaction = ufw
+# NOVINKA: Unbanaction! Keď bantime vypršal, Fail2Ban automaticky vymaže z UFW/>
+unbanaction = ufw
+banaction_allports = ufw
+action = %(action_)s
+
+
+# --------[nginx-recon]-----------------------------------------------
+# KRITICKÁ OCHRANA: Detekcia reconnaissance/scan requestov
+# Matchuje prístupy k sensitive files a config súborom:
+# - .env, .git, .npmrc, composer.lock, package-lock.json
+# - .bak, .backup, .old, .sql, dump.sql, database.sql
+# - .DS_Store, .htaccess (root level)
+# - phpinfo.php, info.php, test.php
+# - wp-admin, wp-login, wp-config.php
+# - shell.php, cmd.php, backdoor.php
+# - /backup/, /dump/, /private/, /secret/
+# 
+# OPTIMALIZOVANÉ: Ignoruje legitímne /index.php/* requesty
+# Ban pri 3 pokusoch za 5 minút s incrementom až na 7 dní
+# ------------------------------------------------------------------
+[nginx-recon]
+enabled = true
+port = 80,443
+filter = nginx-recon
+backend = polling
+polltime = 5
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+# Prísne: 3 pokusy o sensitive file access = ban
+maxretry = 3
+bantime = 86400            # 1 deň inicialny ban
+findtime = 300             # 5 minút window
+# Increment: opakované pokusy = dlhší ban
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 604800   # Max 7 dní
+bantime.overalljails = true
+# nftables pre Docker/NPM traffic
+banaction = nftables-multiport[name=nginx-recon, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-recon, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# --------[manualblock]-----------------------------------------------
+# Manuálny jail pre ručné blokovanie specific IP
+# Perma-ban (bantime = -1) podľa logpath (manualblock.log)
+# Používa sa na manuálne vrátenie špatných IP
+# 
+# Príkaz: echo "# 1.2.3.4" >> /etc/fail2ban/manualblock.log
+# alebo: banip 1.2.3.4
+# 
+# Format logu: # IP alebo # IP # Odôvodnenie
+# ------------------------------------------------------------------
+[manualblock]
+enabled = true
+backend = polling  
+usedns = no      
+allowipv6 = auto            
+filter = manualblock
+logpath = /etc/fail2ban/manualblock.log
+bantime = -1              
+findtime = 1
+maxretry = 1
+# OPRAVENÉ s unbanaction:
+banaction = nftables-multiport[name=manualblock, port="0:65535"]
+unbanaction = nftables-multiport[name=manualblock, port="0:65535", actiontype=unban]
+action = %(action_mwl)s
+
+# ========================= VARIANT B JAILS - 3-LAYER PROTECTION =========================
+# Layer 2: Burst attack detection (8+ attempts in 60 seconds)
+# Layer 3: Known exploit detection (1 attempt = instant ban)
+# ========================================================================================
+
+# --------[nginx-4xx-burst]------------------------------------------
+# Detects rapid burst attacks (8+ errors in 60 seconds)
+# For attackers like 192.159.99.95 (10-12 attempts per second)
+# Ban: 30 days initially, increment to max 365 days
+[nginx-4xx-burst]
+enabled = true
+port = 80,443
+filter = nginx-npm-4xx
+backend = polling
+polltime = 5
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+
+# Detection: 8+ errors in 60 seconds = burst attack
+maxretry = 8
+findtime = 60
+
+# Initial ban: 7 days (vs 30 minutes in nginx-4xx)
+bantime = 604800  
+
+# Aggressive increment: 3x multiplication
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = 31536000
+bantime.overalljails = true
+
+# CRITICAL: Own nftables set "nginx-4xx-burst" prevents duplicate bans!
+banaction = nftables-multiport[name=nginx-4xx-burst, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-4xx-burst, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+
+# --------[nginx-exploit-permanent]----------------------------------
+# Detects known exploits (PHP, CGI, XWiki, IoT)
+# Ban immediately and permanently (1 year)
+[nginx-exploit-permanent]
+enabled = true
+port = 80,443
+filter = nginx-exploit-pattern
+backend = polling
+polltime = 5
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+
+# Detection: 1 attempt of known exploit = instant ban
+maxretry = 1
+findtime = 60
+
+# Ban: 1 year (permanent)
+bantime = 31536000
+
+# No increment - permanent is permanent
+bantime.increment = false
+
+banaction = nftables-multiport[name=nginx-exploit, port="80,443"]
+unbanaction = nftables-multiport[name=nginx-exploit, port="80,443", actiontype=unban]
+action = %(action_mwl)s
+
+# =================================================================
+# POZNÁMKY A BEST PRACTICES
+# =================================================================
+#
+# BANTIME VÝRAZY:
+# - 3600 = 1 hodina
+# - 86400 = 1 deň
+# - 604800 = 7 dní
+# - -1 = permanentný ban
+#
+# DÔLEŽITÉ: banaction + unbanaction
+# Keď bantime vypršal, Fail2Ban automaticky vymaže IP z nftables/UFW
+# BEZ toho zostáva IP navždy zabanovaná (bug!)
+#
+# BANTIME.INCREMENT
+# - true = exponenciálny rast na každý ďalší pokus
+# - bantime.factor = násobiteľ (2 = zdvojnásobenie)
+# - bantime.maxtime = maximálny čas
+# - bantime.overalljails = recidive efekt (počítať všetky jaily)
+#
+# NFTABLES vs UFW
+# - nftables = vysoký výkon, lepšie pre Docker
+# - UFW = jednoduchšie, lepšie pre systémové služby
+#
+# FILTERS
+# Príslúšajúce filter súbory sa musia nachádzať v:
+# /etc/fail2ban/filter.d/
+# Príklad: /etc/fail2ban/filter.d/npm-iot-exploit.conf
+#
+# =================================================================
+# Aplikácia:
+# 
+# sudo fail2ban-client -c /etc/fail2ban/ -d  # Test syntax
+# sudo fail2ban-client reload                # Reload
+# f2b-audit                                   # Overuj
+# 
+# =================================================================

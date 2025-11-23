@@ -1,0 +1,39 @@
+{\rtf1\ansi\ansicpg1250\cocoartf2867
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 # NGINX RECON - LOCAL OVERRIDES (EasyAppointments whitelist)\
+# Tento s\'fabor prep\'ed\'9ae ignoreregex z nginx-recon.conf!\
+\
+[Definition]\
+\
+ignoreregex =\
+    # V\'9aetky legit\'edmne EasyAppointments cesty cez index.php (GET/POST/PUT/DELETE)\
+    ^.* (?:GET|POST|PUT|DELETE) https [^ ]+ "/index\\.php/[^"]*" \\[Client <HOST>\\]\
+  \
+    # Statick\'e9 assets \'96 JS, CSS, obr\'e1zky, fonty, vendor\
+    ^.* GET https [^ ]+ "/assets/[^"]*" \\[Client <HOST>\\]\
+    ^.* GET https [^ ]+ "/assets/vendor/[^"]*" \\[Client <HOST>\\]\
+    ^.* GET https [^ ]+ "/assets/js/[^"]*" \\[Client <HOST>\\]\
+    ^.* GET https [^ ]+ "/assets/css/[^"]*" \\[Client <HOST>\\]\
+\
+    # Booking/reschedule \'9apecifick\'e9 cesty\
+    ^.* (?:GET|POST) https [^ ]+ "/[^"]*(?:booking|reschedule)[^"]*" \\[Client <HOST>\\]\
+\
+    # Calendar/appointments module\
+    ^.* (?:GET|POST) https [^ ]+ "/index\\.php/calendar/[^"]*" \\[Client <HOST>\\]\
+    ^.* (?:GET|POST) https [^ ]+ "/calendar/get_calendar_appointments" \\[Client <HOST>\\]\
+\
+    # User/auth endpoints (login, validate, logout)\
+    ^.* (?:GET|POST) https [^ ]+ "/index\\.php/login[^"]*" \\[Client <HOST>\\]\
+    ^.* (?:GET|POST) https [^ ]+ "/login/validate" \\[Client <HOST>\\]\
+\
+    # Favicon, robots, sitemap\
+    ^.* GET https [^ ]+ "/(?:favicon\\.ico|robots\\.txt|sitemap\\.xml)" \\[Client <HOST>\\]\
+\
+    # Akceptuj aj dotazn\'edky s query parametrom\
+    ^.* GET https [^ ]+ "/[^"]*\\?" \\[Client <HOST>\\]\
+}
