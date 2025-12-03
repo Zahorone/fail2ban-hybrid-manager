@@ -1,0 +1,22 @@
+# Changelog v0.19 → v0.20
+
+## Fixes (2025-12-03)
+
+### f2b wrapper script
+- FIX: F2BTABLE premennú z "inet fail2ban-filter" → "inet f2b-table"
+- FIX: SETMAP array - pridaný "addr-set-" prefix pre všetky jaily
+- FIX: grep pattern v f2b_find() z -qE → -qF (fixed string match)
+
+### Impact
+- f2b find <IP> teraz korektne detekuje IP v nftables
+- f2b sync check zobrazuje reálny stav synchronizácie
+- Žiadne false positive "sync issue!" warningy
+
+### Testing
+- Tested on: terminy.bakic.net (Ubuntu 24.04, Fail2Ban 1.1.0)
+- All 10 jails verified: sync OK
+- Production deployment: 2025-12-03 11:30 CET
+
+## Package
+- verzia_v020-complete-20251203-1130.tar.gz
+- SHA256: da66bc5febca8e8750b53ecf577a49fccccab28c2ac4f800739c789299f385de

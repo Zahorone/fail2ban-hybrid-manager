@@ -1,0 +1,169 @@
+[DEFAULT]
+destemail = zahor@tuta.io
+sender = fail2ban@terminy.bakic.net
+sendername = TermFail2Ban terminy.bakic.net
+# chain = INPUT  # Not used - each jail has explicit nftables-multiport
+findtime = 600
+bantime = 3600
+maxretry = 5
+backend = auto
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16 188.121.168.64
+action = %(banaction)s
+
+[sshd]
+enabled = true
+port = 2222
+filter = sshd
+backend = auto
+logpath = /var/log/auth.log
+maxretry = 2
+findtime = 600
+bantime = 86400
+bantime.increment = true
+bantime.factor = 3
+bantime.maxtime = 604800
+banaction = nftables-multiport[name=sshd, port="2222"]
+banaction_allports = nftables-multiport[name=sshd, port="2222"]
+unbanaction = nftables-multiport[name=sshd, port="2222", actiontype=unban]
+action = %(action_mwl)s
+
+[recidive]
+enabled = true
+logpath = /var/log/fail2ban.log
+backend = auto
+maxretry = 5
+findtime = 604800
+bantime = 2592000
+banaction = nftables-multiport[name=recidive, port="0:65535"]
+unbanaction = nftables-multiport[name=recidive, port="0:65535", actiontype=unban]
+action = %(action_mwl)s
+filter = recidive
+
+[manualblock]
+enabled = true
+logpath = /var/log/fail2ban-blocked-ips.txt
+backend = auto
+maxretry = 1
+bantime = 31536000
+banaction = nftables-multiport[name=manualblock, port="0:65535"]
+unbanaction = nftables-multiport[name=manualblock, port="0:65535", actiontype=unban]
+action = %(action_mwl)s
+filter = manualblock
+
+[f2b-exploit-critical]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 1
+findtime = 600
+bantime = 31536000
+banaction = nftables-multiport[name=f2b-exploit-critical, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-exploit-critical, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-exploit-critical, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-exploit-critical
+
+[f2b-dos-high]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 1
+findtime = 600
+bantime = 604800
+banaction = nftables-multiport[name=f2b-dos-high, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-dos-high, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-dos-high, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-dos-high
+
+[f2b-web-medium]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 6
+findtime = 600
+bantime = 1800
+bantime.increment = true
+bantime.maxtime = 604800
+banaction = nftables-multiport[name=f2b-web-medium, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-web-medium, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-web-medium, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-web-medium
+
+[nginx-recon-bonus]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 3
+findtime = 600
+bantime = 1h
+bantime.increment = true
+bantime.factor = 24
+bantime.maxtime = 7d
+banaction = nftables-multiport[name=nginx-recon-bonus, port="http,https"]
+banaction_allports = nftables-multiport[name=nginx-recon-bonus, port="http,https"]
+unbanaction = nftables-multiport[name=nginx-recon-bonus, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = nginx-recon-optimized
+
+# ============================================================
+# NEW JAILS - v0.9.2 UPDATE (3 new)
+# ============================================================
+
+[f2b-fuzzing-payloads]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 2
+findtime = 600
+bantime = 1800
+bantime.increment = true
+bantime.maxtime = 86400
+banaction = nftables-multiport[name=f2b-fuzzing-payloads, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-fuzzing-payloads, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-fuzzing-payloads, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-fuzzing-payloads
+
+[f2b-botnet-signatures]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 1
+findtime = 600
+bantime = 86400
+banaction = nftables-multiport[name=f2b-botnet-signatures, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-botnet-signatures, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-botnet-signatures, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-botnet-signatures
+
+[f2b-anomaly-detection]
+enabled = true
+port = http,https
+logpath = /opt/rustnpm/data/logs/fallback_access.log
+          /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend = polling
+maxretry = 3
+findtime = 600
+bantime = 900
+bantime.increment = true
+bantime.maxtime = 3600
+banaction = nftables-multiport[name=f2b-anomaly-detection, port="http,https"]
+banaction_allports = nftables-multiport[name=f2b-anomaly-detection, port="http,https"]
+unbanaction = nftables-multiport[name=f2b-anomaly-detection, port="http,https", actiontype=unban]
+action = %(action_mwl)s
+filter = f2b-anomaly-detection
