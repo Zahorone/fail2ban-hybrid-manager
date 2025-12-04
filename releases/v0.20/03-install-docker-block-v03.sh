@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Docker Port Blocking v0.3 - Standalone
+# Docker Port Blocking v0.3 - Standalone (FIXED)
 # Works with nftables-rebuild v2.1
 # Creates PERSISTENT configuration via /etc/nftables/docker-block.nft
 # Preserves existing /etc/nftables.conf if correct, creates/fixes if needed
@@ -15,10 +15,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log() { echo -e "${GREEN}[OK]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log()    { echo -e "${GREEN}[OK]${NC} $1"; }
+error()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+warning(){ echo -e "${YELLOW}[WARN]${NC} $1"; }
+info()   { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 echo ""
 echo "══════════════════════════════════════════════════════════"
@@ -47,24 +47,24 @@ cat > /etc/nftables/docker-block.nft << 'EOF'
 # Blocks external access to Docker ports while allowing localhost
 
 table inet docker-block {
-    set blocked_ports {
+    set docker-blocked-ports {
         type inet_service
         flags interval
         auto-merge
     }
 
     chain prerouting {
-        type filter hook prerouting priority -100; policy accept;
-        
+        type filter hook prerouting priority dstnat; policy accept;
+
         # Allow localhost to access Docker ports
         iif "lo" return
-        
+
         # Allow Docker bridge
         iif "docker0" return
-        
+
         # Block external access to blocked ports
-        tcp dport @blocked_ports drop
-        udp dport @blocked_ports drop
+        tcp dport @docker-blocked-ports drop
+        udp dport @docker-blocked-ports drop
     }
 }
 EOF
@@ -93,12 +93,12 @@ else
         warning "Missing 'flush ruleset' in /etc/nftables.conf"
         CORRECT_STRUCTURE=false
     fi
-    
+
     if ! grep -q "/etc/nftables/docker-block.nft" /etc/nftables.conf; then
         warning "Missing docker-block include in /etc/nftables.conf"
         CORRECT_STRUCTURE=false
     fi
-    
+
     if ! grep -q "/etc/nftables.d/fail2ban-filter.nft" /etc/nftables.conf; then
         warning "Missing fail2ban-filter include in /etc/nftables.conf"
         CORRECT_STRUCTURE=false
@@ -111,7 +111,7 @@ fi
 
 if [ "$CORRECT_STRUCTURE" != true ] && [ "$DOCKER_BLOCK_AUTOFIX" = 1 ]; then
     info "Creating/fixing /etc/nftables.conf..."
-    
+
     cat > /etc/nftables.conf << 'EOF'
 #!/usr/sbin/nft -f
 
@@ -123,7 +123,7 @@ include "/etc/nftables.d/fail2ban-filter.nft"
 # Docker port blocking (v0.3)
 include "/etc/nftables/docker-block.nft"
 EOF
-    
+
     chown root:root /etc/nftables.conf
     chmod 644 /etc/nftables.conf
     log "/etc/nftables.conf created/fixed"
@@ -193,20 +193,21 @@ else
     warning "✗ Table inet docker-block NOT found"
 fi
 
-# Check if blocked_ports set exists
-if nft list set inet docker-block blocked_ports &>/dev/null; then
-    log "✓ Set blocked_ports exists"
-    
+# Check if docker-blocked-ports set exists
+if nft list set inet docker-block docker-blocked-ports &>/dev/null; then
+    log "✓ Set docker-blocked-ports exists"
+
     # Show current blocked ports
-    BLOCKED=$(nft list set inet docker-block blocked_ports 2>/dev/null | sed -n '/elements = {/,/}/p' | grep -oE '[0-9]+' | tr '\n' ',' | sed 's/,$//')
-    
+    BLOCKED=$(nft list set inet docker-block docker-blocked-ports 2>/dev/null \
+        | sed -n '/elements = {/,/}/p' | grep -oE '[0-9]+' | tr '\n' ',' | sed 's/,$//')
+
     if [ -z "$BLOCKED" ]; then
         info "  Currently no ports blocked (empty set)"
     else
         info "  Currently blocked ports: $BLOCKED"
     fi
 else
-    warning "✗ Set blocked_ports NOT found"
+    warning "✗ Set docker-blocked-ports NOT found"
 fi
 
 echo ""
@@ -235,9 +236,9 @@ echo "  f2b manage unblock-port 8081"
 echo "  f2b manage docker-info"
 echo ""
 echo "Manual management (if needed):"
-echo "  nft add element inet docker-block blocked_ports { 8081 }"
-echo "  nft delete element inet docker-block blocked_ports { 8081 }"
-echo "  nft list set inet docker-block blocked_ports"
+echo "  nft add element inet docker-block docker-blocked-ports { 8081 }"
+echo "  nft delete element inet docker-block docker-blocked-ports { 8081 }"
+echo "  nft list set inet docker-block docker-blocked-ports"
 echo ""
 echo "Test reload:"
 echo "  sudo nft -f /etc/nftables.conf"
