@@ -100,34 +100,49 @@ chmod 644 /etc/fail2ban/jail.local
 log "Installed: /etc/fail2ban/jail.local"
 echo ""
 
-# Step 3: Copy filters
+# Step 3: Copy filters (idempotent, overwrite existing)
 if [[ -n "$FILTERSDIR" && $FILTERCOUNT -gt 0 ]]; then
-    log "Step 3/7: Installing filters..."
+    log "Step 3/7: Installing filters (idempotent, overwrite existing)..."
     INSTALLEDFILTERS=0
-    
+
     while IFS= read -r filterfile; do
         FILTERNAME=$(basename "$filterfile")
-        
-        # Backup existing filter
-        if [[ -f "/etc/fail2ban/filter.d/$FILTERNAME" ]]; then
-            FILTERBACKUP="/etc/fail2ban/filter.d/$FILTERNAME.backup-$(date +%Y%m%d-%H%M)"
-            cp "/etc/fail2ban/filter.d/$FILTERNAME" "$FILTERBACKUP"
-            info "  Backed up $FILTERNAME"
+
+        # Skip if source missing
+        if [[ ! -f "$filterfile" ]]; then
+            log_warn "  Skipping $FILTERNAME (source not found: $filterfile)"
+            continue
         fi
-        
-        # Copy new filter
-        cp "$filterfile" /etc/fail2ban/filter.d/
-        chown root:root "/etc/fail2ban/filter.d/$FILTERNAME"
-        chmod 644 "/etc/fail2ban/filter.d/$FILTERNAME"
-        log "  Installed: $FILTERNAME"
-        ((INSTALLEDFILTERS++))
-    done < <(find "$FILTERSDIR" -name "*.conf" 2>/dev/null)
-    
+
+        TARGET="/etc/fail2ban/filter.d/$FILTERNAME"
+
+        # Backup existing filter (always, ak existuje)
+        if [[ -f "$TARGET" ]]; then
+            BACKUP="/etc/fail2ban/filter.d/${FILTERNAME}.backup-$(date +%Y%m%d-%H%M)"
+            if cp "$TARGET" "$BACKUP" 2>/dev/null; then
+                info "  Backed up $FILTERNAME → $(basename "$BACKUP")"
+            else
+                log_warn "  Failed to backup $FILTERNAME (continuing...)"
+            fi
+        fi
+
+        # Always overwrite target
+        if cp "$filterfile" "$TARGET" 2>/dev/null; then
+            chown root:root "$TARGET" 2>/dev/null || log_warn "  chown failed for $FILTERNAME"
+            chmod 644 "$TARGET" 2>/dev/null   || log_warn "  chmod failed for $FILTERNAME"
+            log "  Installed/updated: $FILTERNAME"
+            ((INSTALLEDFILTERS++))
+        else
+            log_warn "  Failed to install $FILTERNAME (continuing...)"
+        fi
+    done < <(find "$FILTERSDIR" -maxdepth 1 -type f -name "*.conf" 2>/dev/null)
+
     echo ""
-    log "Installed $INSTALLEDFILTERS filters"
+    log "Installed/updated $INSTALLEDFILTERS filters"
 else
     info "Step 3/7: No filters to install (skipped)"
 fi
+
 echo ""
 
 # Step 4: Create manualblock.log if needed
