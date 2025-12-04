@@ -50,3 +50,9 @@ For full installation and troubleshooting instructions, follow the documentation
 ## License
 
 MIT License – see `LICENSE`.
+
+## 👤 Author
+
+Peter Bakič  
+vibes coder · self-hosted infra & security  
+Powered by Claude Sonnet 4.5 thinking

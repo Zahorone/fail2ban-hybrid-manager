@@ -307,10 +307,13 @@ MIT License - See LICENSE file
 
 ## 👤 Author
 
-Systems Administrator / DevOps Engineer
+Peter Bakič  
+vibes coder · self-hosted infra & security  
+Powered by Claude Sonnet 4.5 thinking
 
 ## 📞 Support
 
+- Email: zahor@tuta.io
 - GitHub Issues: Report bugs or feature requests
 - Documentation: See `docs/` directory
 - Verification Tool: `sudo bash scripts/02-verify-jails-v020.sh`
