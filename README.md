@@ -59,3 +59,9 @@ MIT License – see `LICENSE`.
 Peter Bakič  
 vibes coder · self-hosted infra & security  
 Powered by Claude Sonnet 4.5 thinking
+
+## ☕ Support
+
+If this project helps you secure your servers and you want to support further development:
+
+- Buy me a coffee: https://www.buymeacoffee.com/peterdelac
