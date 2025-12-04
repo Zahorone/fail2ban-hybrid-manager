@@ -26,6 +26,9 @@ For details of the current stable release, see:
 
 ## Usage
 
+By default, email notification addresses (`destemail`, `sender`) and `ignoreip` in `config/jail.local` are set to generic values. 
+For production, update them before running the installer.
+
 For most users, the recommended way is to download the packaged release:
 
 ```bash

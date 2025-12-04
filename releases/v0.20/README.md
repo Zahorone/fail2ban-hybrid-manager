@@ -150,6 +150,9 @@ sudo f2b report daily
 
 ### Manual Configuration (Production Best Practice)
 
+By default, email notification addresses (`destemail`, `sender`) and `ignoreip` are set to generic values.  
+For production, update them in `config/jail.local` before running the installer.
+
 For production servers with custom requirements:
 
 1. **Edit Configuration**

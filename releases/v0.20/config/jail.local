@@ -1,13 +1,13 @@
 [DEFAULT]
-destemail = zahor@tuta.io
-sender = fail2ban@terminy.bakic.net
-sendername = TermFail2Ban terminy.bakic.net
+destemail = admin@example.com
+sender = fail2ban@example.com
+sendername = Fail2Ban Notifications
 # chain = INPUT  # Not used - each jail has explicit nftables-multiport
 findtime = 600
 bantime = 3600
 maxretry = 5
 backend = auto
-ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16 188.121.168.64
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16
 action = %(banaction)s
 
 [sshd]
