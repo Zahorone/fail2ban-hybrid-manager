@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# F2B Unified Wrapper v0.19 - PRODUCTION
+# F2B Unified Wrapper v0.20 - PRODUCTION
 # Complete Fail2Ban + nftables + docker-block management
 #
 # v0.19 Changes:
@@ -16,7 +16,7 @@
 
 set -o pipefail
 
-VERSION="0.19"
+VERSION="0.20"
 DOCKERBLOCKVERSION="0.3"
 
 # Color codes

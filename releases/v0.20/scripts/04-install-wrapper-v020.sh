@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# F2B Wrapper v0.19 Installation Script
+# F2B Wrapper v0.20 Installation Script
 # Installs the unified F2B management wrapper
 ################################################################################
 
@@ -65,14 +65,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Look for wrapper script
 WRAPPER_SOURCE=""
-if [ -f "$SCRIPT_DIR/f2b-wrapper-v019.sh" ]; then
-    WRAPPER_SOURCE="$SCRIPT_DIR/f2b-wrapper-v019.sh"
+if [ -f "$SCRIPT_DIR/f2b-wrapper-v020.sh" ]; then
+    WRAPPER_SOURCE="$SCRIPT_DIR/f2b-wrapper-v020.sh"
 elif [ -f "$SCRIPT_DIR/f2b-wrapper.sh" ]; then
     WRAPPER_SOURCE="$SCRIPT_DIR/f2b-wrapper.sh"
-elif [ -f "$HOME/f2b-wrapper-v019.sh" ]; then
-    WRAPPER_SOURCE="$HOME/f2b-wrapper-v019.sh"
+elif [ -f "$HOME/f2b-wrapper-v020.sh" ]; then
+    WRAPPER_SOURCE="$HOME/f2b-wrapper-v020.sh"
 else
-    error "F2B wrapper script not found. Please ensure f2b-wrapper-v019.sh is in: $SCRIPT_DIR"
+    error "F2B wrapper script not found. Please ensure f2b-wrapper-v020.sh is in: $SCRIPT_DIR"
 fi
 
 info "Found wrapper script: $WRAPPER_SOURCE"

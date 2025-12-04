@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Install Fail2Ban Jail Configuration and Filters v0.19
+# Install Fail2Ban Jail Configuration and Filters v0.20
 # Copies jail.local and filter files to /etc/fail2ban
 ################################################################################
 
@@ -21,7 +21,7 @@ info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
-echo "  Fail2Ban Jail Configuration Installation v0.19"
+echo "  Fail2Ban Jail Configuration Installation v0.20"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
@@ -233,7 +233,7 @@ log "• Service: Running"
 echo ""
 
 # Expected jails
-echo "Expected jails in v0.19:"
+echo "Expected jails in v0.20:"
 echo "  1. sshd"
 echo "  2. f2b-exploit-critical"
 echo "  3. f2b-dos-high"

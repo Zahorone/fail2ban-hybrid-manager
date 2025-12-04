@@ -2,7 +2,7 @@
 ################################################################################
 # COMPLETE REBUILD: nftables Fail2Ban Infrastructure
 # Vytvorí kompletnú nftables tabuľku, reťazce, sety a pravidlá
-# Version: 2.1 (enhanced for v0.19)
+# Version: 2.1 (enhanced for v0.20)
 # Date: 2025-12-01
 # Changelog: IPv4+IPv6 support, robustnejší banned list, fail2ban-client get
 ################################################################################
@@ -144,108 +144,60 @@ log_success "FORWARD pravidlá pridané (6/6)"
 echo ""
 
 ################################################################################
-
-################################################################################
-################################################################################
-# KROK 6: MIGRÁCIA IP Z FAIL2BAN DO nftables (FIXED v2.2)
-# Parsuje Python list format: ['ip1', 'ip2'] -> ip1 ip2
+# KROK 6: MIGRÁCIA IP Z FAIL2BAN (robustnejší)
 ################################################################################
 
 log_header "KROK 6: MIGRÁCIA IP Z FAIL2BAN DO nftables"
 
-# Mapovanie jail -> nftables set
-declare -A JAIL_TO_SET=(
-    ["sshd"]="f2b-sshd"
-    ["f2b-exploit-critical"]="f2b-exploit-critical"
-    ["f2b-dos-high"]="f2b-dos-high"
-    ["f2b-web-medium"]="f2b-web-medium"
-    ["nginx-recon-bonus"]="f2b-nginx-recon-bonus"
-    ["recidive"]="f2b-recidive"
-    ["manualblock"]="f2b-manualblock"
-    ["f2b-fuzzing-payloads"]="f2b-fuzzing-payloads"
-    ["f2b-botnet-signatures"]="f2b-botnet-signatures"
-    ["f2b-anomaly-detection"]="f2b-anomaly-detection"
+JAILS=(
+    "sshd:f2b-sshd"
+    "f2b-exploit-critical:f2b-exploit-critical"
+    "f2b-dos-high:f2b-dos-high"
+    "f2b-web-medium:f2b-web-medium"
+    "nginx-recon-bonus:f2b-nginx-recon-bonus"
+    "recidive:f2b-recidive"
+    "manualblock:f2b-manualblock"
+    "f2b-fuzzing-payloads:f2b-fuzzing-payloads"
+    "f2b-botnet-signatures:f2b-botnet-signatures"
+    "f2b-anomaly-detection:f2b-anomaly-detection"
 )
 
-TOTAL_IMPORTED=0
-
-for jail in "${!JAIL_TO_SET[@]}"; do
-    SET="${JAIL_TO_SET[$jail]}"
+for entry in "${JAILS[@]}"; do
+    IFS=':' read -r jail set <<< "$entry"
     
-    # Get banned IPs from fail2ban
-    RAW_OUTPUT=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || echo "[]")
+    # Použiť fail2ban-client get pre robustnejší výstup
+    IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
     
-    # Skip if empty or []
-    if [ -z "$RAW_OUTPUT" ] || [ "$RAW_OUTPUT" = "[]" ]; then
+    if [ -z "$IPS" ]; then
         continue
     fi
     
-    # Parse Python list format: ['ip1', 'ip2', 'ip3'] -> ip1 ip2 ip3
-    # Remove: [ ] ' and replace , with space
-    CLEANED_IPS=$(echo "$RAW_OUTPUT" | sed "s/\[//g; s/\]//g; s/'//g; s/,/ /g" | xargs)
+    COUNT=$(echo "$IPS" | grep -c '^' 2>/dev/null || echo 0)
     
-    if [ -z "$CLEANED_IPS" ]; then
-        continue
-    fi
-    
-    # Count IPs
-    IP_COUNT=$(echo "$CLEANED_IPS" | wc -w)
-    
-    if [ "$IP_COUNT" -eq 0 ]; then
-        continue
-    fi
-    
-    log_info "$jail -> $SET ($IP_COUNT IPs)"
-    
-    ADDED_V4=0
-    ADDED_V6=0
-    FAILED=0
-    
-    # Add each IP individually
-    for ip in $CLEANED_IPS; do
-        # Skip empty
-        if [ -z "$ip" ]; then
-            continue
-        fi
+    if [ "$COUNT" -gt 0 ]; then
+        log_info "$jail -> $set ($COUNT IP)"
         
-        # Detect IPv6 (contains :)
-        if echo "$ip" | grep -q ':'; then
-            # IPv6
-            if sudo nft add element inet fail2ban-filter "${SET}-v6" "{ $ip timeout 604800s }" 2>/dev/null; then
-                ((ADDED_V6++))
-            else
-                ((FAILED++))
+        while IFS= read -r ip; do
+            if [ -n "$ip" ]; then
+                echo -n "    • $ip ... "
+                
+                # Detect IPv4 vs IPv6
+                if echo "$ip" | grep -q ':'; then
+                    # IPv6
+                    sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v6)" || echo "⚠️"
+                else
+                    # IPv4
+                    sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v4)" || echo "⚠️"
+                fi
             fi
-        else
-            # IPv4
-            if sudo nft add element inet fail2ban-filter "$SET" "{ $ip timeout 604800s }" 2>/dev/null; then
-                ((ADDED_V4++))
-            else
-                ((FAILED++))
-            fi
-        fi
-    done
-    
-    # Report
-    if [ $ADDED_V4 -gt 0 ] || [ $ADDED_V6 -gt 0 ]; then
-        echo "    ✅ Imported: $ADDED_V4 IPv4, $ADDED_V6 IPv6"
-        TOTAL_IMPORTED=$((TOTAL_IMPORTED + ADDED_V4 + ADDED_V6))
-    fi
-    
-    if [ $FAILED -gt 0 ]; then
-        echo "    ⚠️  Failed: $FAILED IPs"
+        done <<< "$IPS"
     fi
 done
 
-if [ $TOTAL_IMPORTED -eq 0 ]; then
-    log_info "No IPs to import (fresh start or all jails empty)"
-else
-    log_success "Total imported: $TOTAL_IMPORTED IPs"
-fi
-
 echo ""
-# KROK 7: REŠTART FAIL2BAN
+
 ################################################################################
+# KROK 7: REŠTART FAIL2BAN
 ################################################################################
 
 log_header "KROK 7: REŠTART FAIL2BAN"

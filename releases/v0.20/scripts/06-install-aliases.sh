@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Install F2B Wrapper Aliases v0.19
+# Install F2B Wrapper Aliases v0.20
 # Adds convenient bash aliases for F2B management
 ################################################################################
 
@@ -18,7 +18,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo ""
 echo "══════════════════════════════════════════════════════════"
-echo "  F2B Wrapper v0.19 - Bash Aliases Installation"
+echo "  F2B Wrapper v0.20 - Bash Aliases Installation"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
@@ -52,7 +52,7 @@ fi
 # Add new aliases
 cat >> "$BASHRC" << 'EOF'
 
-# F2B Wrapper Aliases v0.19
+# F2B Wrapper Aliases v0.20
 # Quick access to F2B management commands
 
 # Core commands
@@ -86,7 +86,7 @@ alias f2b-unban='sudo f2b manage manual-unban'
 alias f2b-reload='sudo f2b manage reload'
 alias f2b-backup='sudo f2b manage backup'
 
-# Reports (NEW v0.19)
+# Reports (NEW v0.20)
 alias f2b-json='sudo f2b report json'
 alias f2b-csv='sudo f2b report csv'
 alias f2b-report='sudo f2b report daily'
@@ -94,7 +94,7 @@ alias f2b-report='sudo f2b report daily'
 # Quick stats
 alias f2b-quick='sudo f2b stats-quick'
 
-# End F2B Wrapper Aliases v0.19
+# End F2B Wrapper Aliases v0.20
 EOF
 
 log "Aliases installed successfully!"
@@ -102,7 +102,7 @@ echo ""
 
 # Summary
 echo "══════════════════════════════════════════════════════════"
-echo "  INSTALLED ALIASES (v0.19)"
+echo "  INSTALLED ALIASES (v0.20)"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 echo "Core:"
@@ -136,7 +136,7 @@ echo "System:"
 echo "  f2b-reload          - Reload firewall"
 echo "  f2b-backup          - Backup config"
 echo ""
-echo "Reports (NEW v0.19):"
+echo "Reports (NEW v0.20):"
 echo "  f2b-json            - Export JSON"
 echo "  f2b-csv             - Export CSV"
 echo "  f2b-report          - Daily report"

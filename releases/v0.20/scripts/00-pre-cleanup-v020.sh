@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Pre-Installation Cleanup for Fail2Ban + nftables v0.19
+# Pre-Installation Cleanup for Fail2Ban + nftables v0.20
 # Safely removes old configurations before fresh install
 ################################################################################
 
@@ -8,7 +8,7 @@ set -e
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════╗"
-echo "║   Pre-Installation Cleanup v0.19                     ║"
+echo "║   Pre-Installation Cleanup v0.20                     ║"
 echo "╚═══════════════════════════════════════════════════════╝"
 echo ""
 
@@ -20,7 +20,7 @@ fi
 
 # === STEP 1: BACKUP ===
 echo "🔄 Step 1: Creating backup..."
-BACKUP_DIR=~/nft-backup-pre-v019-$(date +%Y%m%d-%H%M)
+BACKUP_DIR=~/nft-backup-pre-v020-$(date +%Y%m%d-%H%M)
 mkdir -p "$BACKUP_DIR"
 
 # Backup nftables ruleset
@@ -160,9 +160,9 @@ echo "╚═══════════════════════�
 echo ""
 echo "📁 Backup location: $BACKUP_DIR"
 echo ""
-echo "🚀 Ready for v0.19 installation!"
+echo "🚀 Ready for v0.20 installation!"
 echo ""
 echo "Next steps:"
 echo "  1. Review backup if needed: ls -lh $BACKUP_DIR"
-echo "  2. Run installer: sudo bash INSTALL-ALL-v019.sh"
+echo "  2. Run installer: sudo bash INSTALL-ALL-v020.sh"
 echo ""

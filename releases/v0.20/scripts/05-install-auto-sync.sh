@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Initial Force Sync v0.19
+# Initial Force Sync v0.20
 # One-shot sync: Fail2Ban → nftables
 # Used after installation or upgrade from older version
 # Does NOT create timer - use cron for scheduled syncs

@@ -24,10 +24,8 @@ bantime.factor = 3
 bantime.maxtime = 604800
 banaction = nftables-multiport[name=sshd, port="2222"]
 banaction_allports = nftables-multiport[name=sshd, port="2222"]
-unbanaction = notables-multiport[name=sshd, port="2222", actiontype=unban]
-# sends mail start/stop only. Doesn't send ban.
-action = %(action_)s
-         mail[name=%(__name__)s, dest="%(destemail)s", actionban="", actionunban=""]
+unbanaction = nftables-multiport[name=sshd, port="2222", actiontype=unban]
+action = %(action_mwl)s
 
 [recidive]
 enabled = true
@@ -96,8 +94,7 @@ bantime.maxtime = 604800
 banaction = nftables-multiport[name=f2b-web-medium, port="http,https"]
 banaction_allports = nftables-multiport[name=f2b-web-medium, port="http,https"]
 unbanaction = nftables-multiport[name=f2b-web-medium, port="http,https", actiontype=unban]
-action = %(action_)s
-         mail[name=%(__name__)s, dest="%(destemail)s", actionban="", actionunban=""]
+action = %(action_mwl)s
 filter = f2b-web-medium
 
 [nginx-recon-bonus]
