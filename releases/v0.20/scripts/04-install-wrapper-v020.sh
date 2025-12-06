@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.19"
+VERSION="0.20"
 
 # Colors
 RED='\033[0;31m'
