@@ -226,7 +226,8 @@ f2b_audit() {
     local clean=0
     
     for jail in "${JAILS[@]}"; do
-        local count=$(get_f2b_count "$jail")
+        local count=$(get_f2b_count "$jail" | tr -d '[:space:]')
+        count=${count:-0}
         if [ "$count" -eq 0 ]; then
             log_success "[$jail] clean"
             ((clean++))
@@ -595,7 +596,8 @@ monitor_status() {
     echo "Active Jails:"
     local active=0
     for jail in "${JAILS[@]}"; do
-        local count=$(get_f2b_count "$jail")
+        local count=$(get_f2b_count "$jail" | tr -d '[:space:]')
+        count=${count:-0}  # fallback, ak je prázdne
         if [ "$count" -gt 0 ]; then
             echo "  $jail: $count"
             ((active++))
@@ -678,7 +680,8 @@ monitor_watch() {
         
         local total=0
         for jail in "${JAILS[@]}"; do
-            local count=$(get_f2b_count "$jail")
+            local count=$(get_f2b_count "$jail" | tr -d '[:space:]')
+            count=${count:-0}  # fallback, ak je prázdne
             if [ "$count" -gt 0 ]; then
                 echo "  $jail: $count"
                 ((total+=count))
