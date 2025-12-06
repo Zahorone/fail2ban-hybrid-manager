@@ -136,8 +136,9 @@ validate_ip() {
 
 get_f2b_count() {
     local jail="$1"
-    local count=$(sudo fail2ban-client status "$jail" 2>/dev/null | grep "Currently banned" | awk '{print $NF}')
+    local count=$(sudo fail2ban-client status "$jail" 2>/dev/null | grep "Currently banned" | awk '{print $NF}' | head -n1 | tr -d '[:space:]')
     echo "${count:-0}"
+
 }
 
 get_f2b_ips() {
@@ -152,18 +153,18 @@ get_f2b_ips() {
 
 get_nft_ips() {
     local set="$1"
-    sudo nft list set $F2BTABLE "$set" 2>/dev/null | \
-        grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]+)?' | \
-        sort -u
+    sudo nft list set "$F2BTABLE" "$set" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u
 }
 
 count_ips() {
     local ips="$1"
     if [ -z "$ips" ]; then
-        echo 0
+        echo "0"
     else
-        echo "$ips" | wc -l
-    fi
+        echo "$ips" | wc -l | tr -d '[:space:]'
+fi
+
+
 }
 
 ################################################################################
@@ -303,9 +304,9 @@ f2b_sync_check() {
     local ALLSYNCED=true
     
     for jail in "${JAILS[@]}"; do
-        local F2BCOUNT=$(get_f2b_count "$jail")
+        local F2BCOUNT=$(get_f2b_count "$jail" | tr -d '[:space:]')
         local nftset="${SETMAP[$jail]}"
-        local NFTCOUNT=$(get_nft_ips "$nftset" | wc -l)
+        local NFTCOUNT=$(get_nft_ips "$nftset" | wc -l | tr -d '[:space:]')
         
         local DIFF=$((F2BCOUNT - NFTCOUNT))
         local DIFFABS=${DIFF#-}
@@ -737,18 +738,22 @@ monitor_trends() {
     echo ""
     
     # Threat assessment
-    if [ "$last_hour" -gt 50 ]; then
-        log_alert "⚠️  CRITICAL: HIGH ATTACK INTENSITY!"
-        echo ""
-        log_info "Recommended actions:"
-        log_info "  • Review logs: f2b monitor jail-log <jail>"
-        log_info "  • Check top attackers: f2b monitor top-attackers"
-        log_info "  • Consider enabling stricter rules"
-    elif [ "$last_hour" -gt 20 ]; then
-        log_warn "⚠️  WARNING: Elevated attack activity"
-    else
-        log_success "✅ Attack levels normal"
-    fi
+last_hour=$(echo "$last_hour" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
+last_6h=$(echo "$last_6h" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
+last_24h=$(echo "$last_24h" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
+
+if [ "$last_hour" -gt 50 ]; then
+    log_alert "⚠️  CRITICAL: HIGH ATTACK INTENSITY!"
+    echo ""
+    log_info "Recommended actions:"
+    log_info "  • Review logs: f2b monitor jail-log <jail>"
+    log_info "  • Check top attackers: f2b monitor top-attackers"
+    log_info "  • Consider enabling stricter rules"
+elif [ "$last_hour" -gt 20 ]; then
+    log_warn "⚠️  WARNING: Elevated attack activity"
+else
+    log_success "✅ Attack levels normal"
+fi
     echo ""
 }
 
