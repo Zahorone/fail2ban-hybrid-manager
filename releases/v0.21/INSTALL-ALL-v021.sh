@@ -1,20 +1,20 @@
 #!/bin/bash
 ################################################################################
-# Fail2Ban + nftables v0.20 - Universal Installer
+# Fail2Ban + nftables v0.21 - Universal Installer
 # Complete Production Installation with IPv4+IPv6 support
 # 
 # Features:
 #   - Auto-detects: Fresh install / Upgrade from v0.19
 #   - 10 Fail2Ban jails + 10 detection filters
 #   - Full IPv4 + IPv6 dual-stack support
-#   - F2B Wrapper v0.20 (43 functions)
+#   - F2B Wrapper v0.21 (43 functions)
 #   - Docker port blocking v0.3
 #   - Auto-sync service
 #
 # Supports:
 #   - Fresh installation on new servers
 #   - Upgrade from v0.19 (adds IPv6 support)
-#   - Reinstall v0.20 (rebuild components)
+#   - Reinstall v0.20/v0.21 (rebuild components)
 ################################################################################
 
 set -e
@@ -127,7 +127,7 @@ case $INSTALL_TYPE in
         echo "  • Add IPv6 support (10 sets + 10 rules)"
         echo "  • Upgrade INPUT rules: 10 → 20"
         echo "  • Upgrade FORWARD rules: 3 → 6"
-        echo "  • Update F2B wrapper to v0.20"
+        echo "  • Update F2B wrapper to v0.21"
         echo "  • Add new filters if missing"
         echo "  • Preserve all banned IPs"
         ;;
@@ -139,7 +139,7 @@ case $INSTALL_TYPE in
         ;;
 
     upgrade)
-        echo "GENERIC UPGRADE to v0.20"
+        echo "GENERIC UPGRADE to v0.21"
         ;;
 esac
 
