@@ -51,6 +51,7 @@ table inet docker-block {
         type inet_service
         flags interval
         auto-merge
+        elements = { } 
     }
 
     chain prerouting {

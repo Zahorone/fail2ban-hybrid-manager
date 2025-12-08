@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Install F2B Wrapper Aliases v0.21
+# Install F2B Wrapper Aliases v0.22
 # Adds convenient bash aliases for F2B management
 ################################################################################
 
@@ -18,7 +18,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo ""
 echo "══════════════════════════════════════════════════════════"
-echo "  F2B Wrapper v0.21 - Bash Aliases Installation"
+echo "  F2B Wrapper v0.22 - Bash Aliases Installation"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
@@ -52,7 +52,7 @@ fi
 # Add new aliases
 cat >> "$BASHRC" << 'EOF'
 
-# F2B Wrapper Aliases v0.21
+# F2B Wrapper Aliases v0.22
 # Quick access to F2B management commands
 
 # Core commands
@@ -81,6 +81,7 @@ alias f2b-docker='sudo f2b manage docker-info'
 # IP management
 alias f2b-ban='sudo f2b manage manual-ban'
 alias f2b-unban='sudo f2b manage manual-unban'
+alias f2b-unban-all='sudo f2b manage unban-all'
 
 # System management
 alias f2b-reload='sudo f2b manage reload'
@@ -94,7 +95,7 @@ alias f2b-report='sudo f2b report daily'
 # Quick stats
 alias f2b-quick='sudo f2b stats-quick'
 
-# End F2B Wrapper Aliases v0.21
+# End F2B Wrapper Aliases v0.22
 EOF
 
 log "Aliases installed successfully!"
@@ -102,7 +103,7 @@ echo ""
 
 # Summary
 echo "══════════════════════════════════════════════════════════"
-echo "  INSTALLED ALIASES (v0.21)"
+echo "  INSTALLED ALIASES (v0.22)"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 echo "Core:"

@@ -144,55 +144,89 @@ log_success "FORWARD pravidlá pridané (6/6)"
 echo ""
 
 ################################################################################
-# KROK 6: MIGRÁCIA IP Z FAIL2BAN (robustnejší)
+# KROK 6: MIGRÁCIA IP Z FAIL2BAN (s ošetrením čistej inštalácie)
 ################################################################################
 
 log_header "KROK 6: MIGRÁCIA IP Z FAIL2BAN DO nftables"
 
-JAILS=(
-    "sshd:f2b-sshd"
-    "f2b-exploit-critical:f2b-exploit-critical"
-    "f2b-dos-high:f2b-dos-high"
-    "f2b-web-medium:f2b-web-medium"
-    "nginx-recon-bonus:f2b-nginx-recon-bonus"
-    "recidive:f2b-recidive"
-    "manualblock:f2b-manualblock"
-    "f2b-fuzzing-payloads:f2b-fuzzing-payloads"
-    "f2b-botnet-signatures:f2b-botnet-signatures"
-    "f2b-anomaly-detection:f2b-anomaly-detection"
-)
-
-for entry in "${JAILS[@]}"; do
-    IFS=':' read -r jail set <<< "$entry"
+# Skontroluj či fail2ban vôbec beží
+if ! systemctl is-active --quiet fail2ban 2>/dev/null; then
+    log_warn "Fail2ban nie je aktívny - preskakujem migráciu (čistá inštalácia)"
+    echo ""
+else
+    # Skontroluj či existujú nejaké jailly
+    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
     
-    # Použiť fail2ban-client get pre robustnejší výstup
-    IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
-    
-    if [ -z "$IPS" ]; then
-        continue
-    fi
-    
-    COUNT=$(echo "$IPS" | grep -c '^' 2>/dev/null || echo 0)
-    
-    if [ "$COUNT" -gt 0 ]; then
-        log_info "$jail -> $set ($COUNT IP)"
+    if [ "$ACTIVE_JAILS" -eq 0 ]; then
+        log_warn "Žiadne aktívne jailly - preskakujem migráciu (čistá inštalácia)"
+        log_info "Toto je OK pre prvú inštaláciu"
+        echo ""
+    else
+        log_info "Detekované $ACTIVE_JAILS aktívnych jailov, pokúsim sa migrovať IP..."
+        echo ""
         
-        while IFS= read -r ip; do
-            if [ -n "$ip" ]; then
-                echo -n "    • $ip ... "
-                
-                # Detect IPv4 vs IPv6
-                if echo "$ip" | grep -q ':'; then
-                    # IPv6
-                    sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v6)" || echo "⚠️"
-                else
-                    # IPv4
-                    sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v4)" || echo "⚠️"
-                fi
+        JAILS=(
+            "sshd:f2b-sshd"
+            "f2b-exploit-critical:f2b-exploit-critical"
+            "f2b-dos-high:f2b-dos-high"
+            "f2b-web-medium:f2b-web-medium"
+            "nginx-recon-bonus:f2b-nginx-recon-bonus"
+            "recidive:f2b-recidive"
+            "manualblock:f2b-manualblock"
+            "f2b-fuzzing-payloads:f2b-fuzzing-payloads"
+            "f2b-botnet-signatures:f2b-botnet-signatures"
+            "f2b-anomaly-detection:f2b-anomaly-detection"
+        )
+        
+        MIGRATED_COUNT=0
+        
+        for entry in "${JAILS[@]}"; do
+            IFS=':' read -r jail set <<< "$entry"
+            
+            # Skontroluj či jail existuje
+            if ! sudo fail2ban-client status "$jail" &>/dev/null; then
+                continue
             fi
-        done <<< "$IPS"
+            
+            # Získaj banned IP
+            IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
+            
+            if [ -z "$IPS" ]; then
+                continue
+            fi
+            
+            COUNT=$(echo "$IPS" | grep -c '^' 2>/dev/null || echo 0)
+            
+            if [ "$COUNT" -gt 0 ]; then
+                log_info "$jail -> $set ($COUNT IP)"
+                
+                while IFS= read -r ip; do
+                    if [ -n "$ip" ]; then
+                        echo -n "    • $ip ... "
+                        
+                        # Detect IPv4 vs IPv6
+                        if echo "$ip" | grep -q ':'; then
+                            # IPv6
+                            sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v6)" || echo "⚠️"
+                        else
+                            # IPv4
+                            sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v4)" || echo "⚠️"
+                        fi
+                        ((MIGRATED_COUNT++))
+                    fi
+                done <<< "$IPS"
+            fi
+        done
+        
+        echo ""
+        
+        if [ "$MIGRATED_COUNT" -gt 0 ]; then
+            log_success "Migrovalo sa $MIGRATED_COUNT IP adries"
+        else
+            log_info "Žiadne IP na migráciu (čisté jailly)"
+        fi
     fi
-done
+fi
 
 echo ""
 
