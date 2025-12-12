@@ -15,7 +15,7 @@
 set -o pipefail
 
 VERSION="0.23"
-DOCKERBLOCKVERSION="0.3"
+DOCKERBLOCKVERSION="0.4"
 
 # Color codes
 RED='\033[0;31m'
@@ -486,7 +486,7 @@ f2b_sync_docker() {
     # Kontrola docker-block tabuľky
     if ! sudo nft list table inet docker-block &>/dev/null; then
         log_error "docker-block table NOT FOUND"
-        log_info  "Install with: bash 03-install-docker-block-v03.sh"
+        log_info  "Install with: bash 03-install-docker-block-v04.sh"
         echo ""
         return 1
     fi
@@ -1114,7 +1114,7 @@ f2b_docker_info() {
         echo ""
 
         echo "To install:"
-        echo " bash docker-block-v0.3-fix.sh"
+        echo " bash 03-install-docker-block-v04.sh"
     fi
 
     echo ""
