@@ -69,22 +69,24 @@ sudo f2b audit
 ## 📁 Repository Structure
 
 ```
-fail2ban-nftables-v021/
-├── INSTALL-ALL-v021.sh              # Universal installer
+v0.22/
+├── INSTALL-ALL-v022.sh              # Universal installer
 ├── scripts/
 │   ├── 00-pre-cleanup-v021.sh       # Pre-installation cleanup
-│   ├── 01-install-nftables-v021.sh  # nftables (IPv4+IPv6)
+│   ├── 01-install-nftables-v022.sh  # nftables (IPv4+IPv6)
 │   ├── 02-install-jails-v021.sh     # Jails installer (copies filters)
 │   ├── 02-verify-jails-v021.sh      # Jails verifier (diagnostic)
-│   ├── 03-install-docker-block-v03.sh
-│   ├── 04-install-wrapper-v021.sh
+│   ├── 03-install-docker-block-v04.sh
+│   ├── 04-install-wrapper-v023.sh
 │   ├── 05-install-auto-sync.sh
 │   ├── 06-install-aliases.sh
-│   └── f2b-wrapper-v021.sh          # Main wrapper (43 functions)
+│   ├── f2b-wrapper-v023.sh          # Main wrappern
+│   └── 07-setup-docker-sync-cron.sh
 ├── config/
-│   ├── jail.local                   # 10 jails configuration
-│   └── nginx-recon-optimized.local  # Nginx jail config
-├── filters/                         # 10 detection filters
+│   ├── jail.local                   # 11 jails configuration
+│   ├── nginx-recon-optimized.local  # Nginx jail config
+│   └── f2b-anomaly-detection.local  # Nginx jail config
+├── filters/                         # 11 detection filters
 │   ├── sshd.conf
 │   ├── f2b-exploit-critical.conf
 │   ├── f2b-dos-high.conf

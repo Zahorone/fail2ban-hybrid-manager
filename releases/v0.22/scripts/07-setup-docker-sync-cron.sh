@@ -1,0 +1,236 @@
+#!/bin/bash
+
+################################################################################
+# 07-setup-docker-sync-cron.sh v0.23
+# Configure automatic docker-block synchronization
+#
+# Creates cron job for bidirectional sync:
+# fail2ban ↔ docker-block (every 1 minute)
+################################################################################
+
+set -e
+
+VERSION="0.23"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Logging functions
+log() { echo -e "${GREEN}[✓]${NC} $1"; }
+error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+info() { echo -e "${BLUE}[ℹ]${NC} $1"; }
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║                                                                ║"
+echo "║        Docker-Block Auto-Sync Configuration v0.23             ║"
+echo "║        Critical for docker-block protection                   ║"
+echo "║                                                                ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Root check
+if [ "$EUID" -ne 0 ]; then
+    error "Please run with sudo: sudo bash $0"
+fi
+
+################################################################################
+# PRE-CHECKS
+################################################################################
+
+info "Verifying prerequisites..."
+echo ""
+
+# Check if f2b wrapper exists
+if [ ! -f /usr/local/bin/f2b ]; then
+    error "F2B wrapper not found at /usr/local/bin/f2b"
+fi
+
+F2B_VERSION=$(/usr/local/bin/f2b version 2>/dev/null | grep -oP 'v\K[0-9.]+' || echo "unknown")
+log "F2B wrapper detected: v${F2B_VERSION}"
+
+# Check if docker-block table exists
+if ! nft list table inet docker-block &>/dev/null; then
+    error "docker-block table not found - install first: bash 03-install-docker-block-v04.sh"
+fi
+
+log "docker-block table found"
+
+# Check if fail2ban is running
+if ! systemctl is-active --quiet fail2ban; then
+    warning "fail2ban is not running - start it first"
+fi
+
+echo ""
+
+################################################################################
+# INSTALL CRON JOB
+################################################################################
+
+info "Installing cron job for docker-block sync..."
+echo ""
+
+CRON_LINE="*/1 * * * * /usr/local/bin/f2b sync docker >> /var/log/f2b-docker-sync.log 2>&1"
+
+# Check if cron job already exists
+if sudo crontab -l 2>/dev/null | grep -q "f2b sync docker"; then
+    warning "Cron job already exists - checking if correct..."
+    
+    EXISTING=$(sudo crontab -l 2>/dev/null | grep "f2b sync docker")
+    
+    if [ "$EXISTING" = "$CRON_LINE" ]; then
+        log "Cron job is correct and active ✅"
+    else
+        warning "Existing cron job differs:"
+        echo "   Current: $EXISTING"
+        echo "   Expected: $CRON_LINE"
+        echo ""
+        read -p "Update cron job? (yes/no): " -r
+        if [[ $REPLY =~ ^[Yy]es$ ]]; then
+            # Remove old and add new
+            sudo crontab -l 2>/dev/null | grep -v "f2b sync docker" | sudo crontab -
+            (sudo crontab -l 2>/dev/null; echo "$CRON_LINE") | sudo crontab -
+            log "Cron job updated ✅"
+        else
+            info "Keeping existing cron job"
+        fi
+    fi
+else
+    # Add new cron job
+    (sudo crontab -l 2>/dev/null; echo "$CRON_LINE") | sudo crontab -
+    log "Cron job added: every 1 minute ✅"
+fi
+
+echo ""
+
+################################################################################
+# CREATE LOG FILE
+################################################################################
+
+info "Setting up log file..."
+echo ""
+
+LOG_FILE="/var/log/f2b-docker-sync.log"
+
+# Create log file if not exists
+if [ ! -f "$LOG_FILE" ]; then
+    sudo touch "$LOG_FILE"
+    sudo chmod 644 "$LOG_FILE"
+    log "Log file created: $LOG_FILE"
+else
+    log "Log file already exists: $LOG_FILE"
+fi
+
+# Add log rotation config
+LOGROTATE_CONF="/etc/logrotate.d/f2b-docker-sync"
+
+if [ ! -f "$LOGROTATE_CONF" ]; then
+    cat <<EOF | sudo tee "$LOGROTATE_CONF" > /dev/null
+/var/log/f2b-docker-sync.log {
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+}
+EOF
+    log "Logrotate config created"
+else
+    log "Logrotate config already exists"
+fi
+
+echo ""
+
+################################################################################
+# INITIAL SYNC
+################################################################################
+
+info "Running initial sync..."
+echo ""
+
+if /usr/local/bin/f2b sync docker; then
+    log "Initial sync completed successfully ✅"
+else
+    warning "Initial sync had issues - check manually"
+fi
+
+echo ""
+
+################################################################################
+# VERIFICATION
+################################################################################
+
+info "Verification:"
+echo ""
+
+# Show cron job
+echo "Installed cron job:"
+sudo crontab -l 2>/dev/null | grep "f2b sync docker" | sed 's/^/  /'
+echo ""
+
+# Check log file
+if [ -s "$LOG_FILE" ]; then
+    echo "Recent sync log (last 5 lines):"
+    tail -5 "$LOG_FILE" | sed 's/^/  /'
+else
+    warning "Log file is empty (sync will run in ~1 minute)"
+fi
+
+echo ""
+
+################################################################################
+# SUMMARY
+################################################################################
+
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║          ✅ Docker-Block Auto-Sync Configured!                ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+
+log "Configuration complete!"
+echo ""
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+info "What happens now?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Every minute, the system will:"
+echo "  1. Sync fail2ban banned IPs → docker-block"
+echo "  2. Remove expired IPs from docker-block"
+echo "  3. Log all changes to $LOG_FILE"
+echo ""
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+info "Monitoring Commands"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "1. Watch sync log in real-time:"
+echo "   sudo tail -f /var/log/f2b-docker-sync.log"
+echo ""
+echo "2. Real-time dashboard (live monitoring):"
+echo "   sudo f2b docker dashboard"
+echo ""
+echo "3. Manual sync (if needed):"
+echo "   sudo f2b sync docker"
+echo ""
+echo "4. Check docker-block status:"
+echo "   sudo f2b docker info"
+echo ""
+echo "5. Verify cron job:"
+echo "   sudo crontab -l | grep docker-sync"
+echo ""
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+log "Setup complete - docker-block auto-sync is now active! 🚀"
+echo ""
+

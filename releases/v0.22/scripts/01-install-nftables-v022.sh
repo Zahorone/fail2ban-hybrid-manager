@@ -233,20 +233,37 @@ fi
 echo ""
 
 ################################################################################
-# KROK 7: REŠTART FAIL2BAN
+# KROK 7: REŠTART FAIL2BAN (CONDITIONAL)
 ################################################################################
 
 log_header "KROK 7: REŠTART FAIL2BAN"
 
-log_info "Zastavujem Fail2Ban..."
-sudo systemctl stop fail2ban
-sleep 2
-
-log_info "Štartujem Fail2Ban..."
-sudo systemctl start fail2ban
-sleep 2
-
-log_success "Fail2Ban reštartovaný"
+# Skontroluj či fail2ban service existuje
+if ! systemctl list-unit-files | grep -q "fail2ban.service"; then
+    log_info "Fail2ban service neexistuje - preskakujem reštart (čistá inštalácia)"
+    log_info "Fail2ban sa nainštaluje v ďalšom kroku"
+    echo ""
+else
+    # Fail2ban service existuje, skontroluj či beží
+    if systemctl is-active --quiet fail2ban 2>/dev/null; then
+        # Skontroluj či má nejaké jails
+        ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
+        
+        if [ "$ACTIVE_JAILS" -gt 0 ]; then
+            log_info "Reštartujem Fail2Ban (detekované $ACTIVE_JAILS jails)..."
+            sudo systemctl restart fail2ban
+            sleep 3
+            log_success "Fail2Ban reštartovaný"
+        else
+            log_info "Fail2Ban beží ale bez jailov - reštart nie je potrebný"
+            log_info "Jails sa nainštalujú v ďalšom kroku"
+        fi
+    else
+        log_info "Fail2ban nie je aktívny - preskakujem reštart"
+        log_info "Fail2ban sa spustí po inštalácii jails"
+    fi
+    echo ""
+fi
 
 echo ""
 
@@ -256,36 +273,94 @@ echo ""
 
 log_header "KROK 8: FINÁLNA KONTROLA"
 
-log_info "nftables Tabuľka:"
+log_info "nftables Tabuľka (prvých 30 riadkov):"
 sudo nft list table inet fail2ban-filter 2>/dev/null | head -30
 
 echo ""
-log_info "Sety:"
+log_info "Vytvorené sety (22 expected: 11 IPv4 + 11 IPv6):"
+SETS_COUNT=$(sudo nft list sets inet fail2ban-filter 2>/dev/null | grep -c "name" || echo 0)
 sudo nft list sets inet fail2ban-filter 2>/dev/null | grep name | sed 's/.*name /  • /'
-
 echo ""
-log_info "Kontrola f2b-dos-high (IPv4):"
+log_info "Počet setov: $SETS_COUNT / 22"
 
-F2B_IPS=$(sudo fail2ban-client get f2b-dos-high banned 2>/dev/null || sudo fail2ban-client status f2b-dos-high 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
-F2B_COUNT=$(echo "$F2B_IPS" | grep -c '^' 2>/dev/null || echo 0)
-
-NFT_IPS=$(sudo nft list set inet fail2ban-filter f2b-dos-high 2>/dev/null | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u)
-NFT_COUNT=$(echo "$NFT_IPS" | grep -c '^' 2>/dev/null || echo 0)
-
-echo "  F2B: $F2B_COUNT IP"
-printf '%s\n' "${NFT_IPS[@]}" | sed 's/^/    • /'
-echo ""
-echo "  nftables: $NFT_COUNT IP"
-printf '%s\n' "${F2B_IPS[@]}" | sed 's/^/    • /'
-
-echo ""
-
-if [ "$F2B_COUNT" -eq "$NFT_COUNT" ] && [ "$F2B_COUNT" -gt 0 ]; then
-    log_success "✅ SYNC OK: F2B ($F2B_COUNT) = nftables ($NFT_COUNT)"
-elif [ "$F2B_COUNT" -eq 0 ] && [ "$NFT_COUNT" -eq 0 ]; then
-    log_success "✅ CLEAN: Bez bannovaných IP"
+if [ "$SETS_COUNT" -eq 22 ]; then
+    log_success "✅ Všetky sety vytvorené!"
 else
-    log_warn "⚠️  MISMATCH: F2B=$F2B_COUNT, nft=$NFT_COUNT"
+    log_warn "⚠️ Očakávaných 22 setov, nájdených $SETS_COUNT"
+fi
+
+echo ""
+log_info "DROP pravidlá v INPUT chain:"
+INPUT_RULES=$(sudo nft list chain inet fail2ban-filter f2b-input 2>/dev/null | grep -c "drop" || echo 0)
+echo "  Počet: $INPUT_RULES / 22 (11 IPv4 + 11 IPv6)"
+
+if [ "$INPUT_RULES" -eq 22 ]; then
+    log_success "✅ Všetky INPUT pravidlá vytvorené!"
+else
+    log_warn "⚠️ Očakávaných 22 pravidiel, nájdených $INPUT_RULES"
+fi
+
+echo ""
+log_info "DROP pravidlá v FORWARD chain:"
+FORWARD_RULES=$(sudo nft list chain inet fail2ban-filter f2b-forward 2>/dev/null | grep -c "drop" || echo 0)
+echo "  Počet: $FORWARD_RULES / 6 (3 IPv4 + 3 IPv6)"
+
+if [ "$FORWARD_RULES" -eq 6 ]; then
+    log_success "✅ Všetky FORWARD pravidlá vytvorené!"
+else
+    log_warn "⚠️ Očakávaných 6 pravidiel, nájdených $FORWARD_RULES"
+fi
+
+echo ""
+
+# CONDITIONAL: Kontrola fail2ban sync iba ak existujú jails
+if systemctl is-active --quiet fail2ban 2>/dev/null; then
+    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
+    
+    if [ "$ACTIVE_JAILS" -gt 0 ]; then
+        log_info "Kontrola fail2ban ↔ nftables sync (sample: f2b-dos-high):"
+        echo ""
+        
+        # Skontroluj či jail f2b-dos-high existuje
+        if sudo fail2ban-client status f2b-dos-high &>/dev/null; then
+            F2B_IPS=$(sudo fail2ban-client get f2b-dos-high banned 2>/dev/null || sudo fail2ban-client status f2b-dos-high 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
+            F2B_COUNT=$(echo "$F2B_IPS" | grep -c '^' 2>/dev/null || echo 0)
+            
+            NFT_IPS=$(sudo nft list set inet fail2ban-filter f2b-dos-high 2>/dev/null | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u)
+            NFT_COUNT=$(echo "$NFT_IPS" | grep -c '^' 2>/dev/null || echo 0)
+            
+            echo "  Fail2Ban (f2b-dos-high): $F2B_COUNT IP"
+            if [ "$F2B_COUNT" -gt 0 ]; then
+                printf '%s\n' "${F2B_IPS[@]}" | sed 's/^/    • /'
+            fi
+            
+            echo ""
+            echo "  nftables (f2b-dos-high): $NFT_COUNT IP"
+            if [ "$NFT_COUNT" -gt 0 ]; then
+                printf '%s\n' "${NFT_IPS[@]}" | sed 's/^/    • /'
+            fi
+            
+            echo ""
+            
+            if [ "$F2B_COUNT" -eq "$NFT_COUNT" ] && [ "$F2B_COUNT" -gt 0 ]; then
+                log_success "✅ SYNC OK: Fail2Ban ($F2B_COUNT) = nftables ($NFT_COUNT)"
+            elif [ "$F2B_COUNT" -eq 0 ] && [ "$NFT_COUNT" -eq 0 ]; then
+                log_success "✅ CLEAN: Žiadne bannované IP (OK pre čistú inštaláciu)"
+            else
+                log_warn "⚠️ MISMATCH: F2B=$F2B_COUNT, nft=$NFT_COUNT"
+                log_info "Spustite 'f2b sync force' po inštalácii"
+            fi
+        else
+            log_info "Jail 'f2b-dos-high' ešte neexistuje (OK pre čistú inštaláciu)"
+            log_info "Jails sa nainštalujú v ďalšom kroku: 02-install-jails-v022.sh"
+        fi
+    else
+        log_info "Fail2ban beží ale bez jailov (čistá inštalácia)"
+        log_info "Jails sa nainštalujú v ďalšom kroku: 02-install-jails-v022.sh"
+    fi
+else
+    log_info "Fail2ban nie je aktívny (čistá inštalácia)"
+    log_info "Fail2ban sa nainštaluje a nakonfiguruje v ďalšom kroku"
 fi
 
 echo ""
