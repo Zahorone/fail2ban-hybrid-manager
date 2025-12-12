@@ -1,25 +1,25 @@
 #!/bin/bash
 ################################################################################
-# Fail2Ban + nftables v0.20 - Universal Installer
+# Fail2Ban + nftables v0.22 - Universal Installer
 # Complete Production Installation with IPv4+IPv6 support
 # 
 # Features:
 #   - Auto-detects: Fresh install / Upgrade from v0.19
-#   - 10 Fail2Ban jails + 10 detection filters
+#   - 11 Fail2Ban jails + 11 detection filters
 #   - Full IPv4 + IPv6 dual-stack support
-#   - F2B Wrapper v0.20 (43 functions)
+#   - F2B Wrapper v0.22 (44 functions)
 #   - Docker port blocking v0.3
 #   - Auto-sync service
 #
 # Supports:
 #   - Fresh installation on new servers
 #   - Upgrade from v0.19 (adds IPv6 support)
-#   - Reinstall v0.20 (rebuild components)
+#   - Reinstall v0.20/v0.21/v0.22 (rebuild components)
 ################################################################################
 
 set -e
 
-export VERSION="0.21"
+export VERSION="0.22"
 
 # Colors
 RED='\033[0;31m'
@@ -40,9 +40,9 @@ clear
 cat << 'EOF'
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
-║      Fail2Ban + nftables Complete Setup v0.21                 ║
+║      Fail2Ban + nftables Complete Setup v0.22                 ║
 ║      Universal Installer (Fresh Install / Upgrade)            ║
-║      Full IPv4 + IPv6 Support + 10 Jails + 10 Filters         ║
+║      Full IPv4 + IPv6 Support + 11 Jails + 11 Filters         ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 EOF
@@ -108,10 +108,10 @@ case $INSTALL_TYPE in
         echo ""
         echo "Will install:"
         echo "  • nftables with fail2ban-filter table (IPv4+IPv6)"
-        echo "  • Fail2Ban with 10 jails"
-        echo "  • 10 detection filters (SSH, exploit, DoS, web, nginx, fuzzing, botnet, anomaly, manual, recidive)"
+        echo "  • Fail2Ban with 11 jails"
+        echo "  • 11 detection filters (SSH, SSH slow, exploit, DoS, web, nginx, fuzzing, botnet, anomaly, manual, recidive)"
         echo "  • Docker port blocking v0.3"
-        echo "  • F2B wrapper v0.21 (43 functions)"
+        echo "  • F2B wrapper v0.22 (44 functions)"
         echo "  • Auto-sync service (hourly)"
         echo "  • Bash aliases"
         ;;
@@ -124,22 +124,22 @@ case $INSTALL_TYPE in
         echo "  • IPv6 sets: $CURRENT_SETS_V6 (missing)"
         echo ""
         echo "Will upgrade to:"
-        echo "  • Add IPv6 support (10 sets + 10 rules)"
-        echo "  • Upgrade INPUT rules: 10 → 20"
+        echo "  • Add IPv6 support (12 sets + 12 rules)"
+        echo "  • Upgrade INPUT rules: 10 → 22"
         echo "  • Upgrade FORWARD rules: 3 → 6"
-        echo "  • Update F2B wrapper to v0.20"
+        echo "  • Update F2B wrapper to v0.22"
         echo "  • Add new filters if missing"
         echo "  • Preserve all banned IPs"
         ;;
 
     reinstall)
-        echo "REINSTALL - v0.21 already present"
+        echo "REINSTALL - v0.22 already present"
         echo ""
         echo "Will rebuild all components while preserving bans"
         ;;
 
     upgrade)
-        echo "GENERIC UPGRADE to v0.20"
+        echo "GENERIC UPGRADE to v0.22"
         ;;
 esac
 
@@ -178,19 +178,19 @@ echo ""
 step 2 $TOTAL_STEPS "Installing nftables infrastructure (IPv4+IPv6)"
 echo ""
 
-if [ -f "$SCRIPT_DIR/scripts/01-install-nftables-v021.sh" ]; then
-    bash "$SCRIPT_DIR/scripts/01-install-nftables-v021.sh" || error "nftables installation failed"
+if [ -f "$SCRIPT_DIR/scripts/01-install-nftables-v022.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/01-install-nftables-v022.sh" || error "nftables installation failed"
 else
     error "nftables installation script not found"
 fi
 echo ""
 
 # Step 3: Install Fail2Ban jails + filters
-step 3 $TOTAL_STEPS "Installing Fail2Ban jails + 10 detection filters"
+step 3 $TOTAL_STEPS "Installing Fail2Ban jails + 11 detection filters"
 echo ""
 
-if [ -f "$SCRIPT_DIR/scripts/02-install-jails-v021.sh" ]; then
-    bash "$SCRIPT_DIR/scripts/02-install-jails-v021.sh" || error "Jails installation failed"
+if [ -f "$SCRIPT_DIR/scripts/02-install-jails-v022.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/02-install-jails-v022.sh" || error "Jails installation failed"
 else
     error "Jails installation script not found"
 fi
@@ -208,16 +208,16 @@ fi
 echo ""
 
 # Step 5: Install F2B wrapper
-step 5 $TOTAL_STEPS "Installing F2B wrapper v0.21 (43 functions)"
+step 5 $TOTAL_STEPS "Installing F2B wrapper v0.22 (44 functions)"
 echo ""
 
 # Try direct wrapper installation first
-if [ -f "$SCRIPT_DIR/scripts/f2b-wrapper-v021.sh" ]; then
-    sudo cp "$SCRIPT_DIR/scripts/f2b-wrapper-v021.sh" /usr/local/bin/f2b
+if [ -f "$SCRIPT_DIR/scripts/f2b-wrapper-v022.sh" ]; then
+    sudo cp "$SCRIPT_DIR/scripts/f2b-wrapper-v022.sh" /usr/local/bin/f2b
     sudo chmod +x /usr/local/bin/f2b
     log "F2B wrapper installed at /usr/local/bin/f2b"
-elif [ -f "$SCRIPT_DIR/scripts/04-install-wrapper-v021.sh" ]; then
-    bash "$SCRIPT_DIR/scripts/04-install-wrapper-v021.sh" || error "Wrapper installation failed"
+elif [ -f "$SCRIPT_DIR/scripts/04-install-wrapper-v022.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/04-install-wrapper-v022.sh" || error "Wrapper installation failed"
 else
     error "Wrapper installation script not found"
 fi
@@ -274,7 +274,7 @@ if [ -x /usr/local/bin/f2b ]; then
     echo "  • Status: Installed ✅"
     F2B_VERSION=$(/usr/local/bin/f2b version 2>/dev/null | grep -oP 'Version \K[0-9.]+' || echo "unknown")
     echo "  • Version: $F2B_VERSION"
-    echo "  • Functions: 43 complete functions"
+    echo "  • Functions: 42 complete functions"
 else
     echo "F2B Wrapper:"
     echo "  • Status: Not found ❌"
@@ -284,11 +284,11 @@ echo ""
 
 # Calculate success
 ERRORS=0
-[ "$SETS_V4" -ne 10 ] && ((ERRORS++))
-[ "$SETS_V6" -ne 10 ] && ((ERRORS++))
-[ "$INPUT_RULES" -ne 20 ] && ((ERRORS++))
+[ "$SETS_V4" -ne 11 ] && ((ERRORS++))
+[ "$SETS_V6" -ne 11 ] && ((ERRORS++))
+[ "$INPUT_RULES" -ne 22 ] && ((ERRORS++))
 [ "$FORWARD_RULES" -ne 6 ] && ((ERRORS++))
-[ "$JAILCOUNT" -lt 8 ] && ((ERRORS++))
+[ "$JAILCOUNT" -lt 11 ] && ((ERRORS++))
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
@@ -309,12 +309,12 @@ log "Installation duration: ${MINUTES}m ${SECONDS}s"
 echo ""
 
 if [ $ERRORS -eq 0 ]; then
-    echo "Your system is now protected with v0.21:"
+    echo "Your system is now protected with v0.22:"
     echo "  ✅ Full IPv4 + IPv6 dual-stack support"
-    echo "  ✅ 20 nftables rules (10 IPv4 + 10 IPv6)"
-    echo "  ✅ 10 Fail2Ban jails + 10 detection filters"
+    echo "  ✅ 22 nftables rules (11 IPv4 + 11 IPv6)"
+    echo "  ✅ 11 Fail2Ban jails + 10 detection filters"
     echo "  ✅ Docker port blocking v0.3"
-    echo "  ✅ F2B wrapper v0.21 (43 functions)"
+    echo "  ✅ F2B wrapper v0.22 (44 functions)"
     echo "  ✅ Auto-sync enabled (hourly)"
 else
     warning "Installation completed with $ERRORS warnings"
@@ -334,13 +334,13 @@ echo "   sudo f2b status"
 echo ""
 echo "3. Verify nftables structure:"
 echo "   sudo nft list chain inet fail2ban-filter f2b-input | grep -c drop"
-echo "   # Should return: 20"
+echo "   # Should return: 22"
 echo ""
 echo "4. Monitor attacks in real-time:"
 echo "   sudo f2b monitor watch"
 echo ""
 echo "5. Optional - Verify configuration:"
-echo "   sudo bash scripts/02-verify-jails-v020.sh"
+echo "   sudo bash scripts/02-verify-jails-v022.sh"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""

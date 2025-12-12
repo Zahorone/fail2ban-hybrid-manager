@@ -1,0 +1,16 @@
+[Definition]
+ignoreregex = ^.* (?:GET|POST|PUT|DELETE) (?:http|https) [^ ]+ "/index\.php/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST) (?:http|https) [^ ]+ "/(?:booking|reschedule|appointment)/.*" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/assets/(?:js|css|images|vendor|lib)/.*" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/static/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST) (?:http|https) [^ ]+ "/calendar/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST) (?:http|https) [^ ]+ "/appointments/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST) (?:http|https) [^ ]+ "/(?:login|auth|authenticate|logout|session)/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST) (?:http|https) [^ ]+ "/login/validate" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/(?:favicon\.ico|robots\.txt|sitemap\.xml|manifest\.json)" \[Client <HOST>\]
+              ^.* (?:GET|POST|PUT|DELETE) (?:http|https) [^ ]+ "/api/v1/.*" \[Client <HOST>\]
+              ^.* (?:GET|POST|PUT|DELETE) (?:http|https) [^ ]+ "/services/.*" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/(?:health|status|ping|heartbeat)" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/index\.php\?.*" \[Client <HOST>\]
+
+

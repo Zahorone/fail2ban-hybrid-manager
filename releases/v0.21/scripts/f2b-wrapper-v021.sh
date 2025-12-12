@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# F2B Unified Wrapper v0.22 - PRODUCTION
+# F2B Unified Wrapper v0.21 - PRODUCTION
 # Complete Fail2Ban + nftables + docker-block management
 #
 # v0.21 Changes:
@@ -16,7 +16,7 @@
 
 set -o pipefail
 
-VERSION="0.22"
+VERSION="0.21"
 DOCKERBLOCKVERSION="0.3"
 
 # Color codes
@@ -488,48 +488,12 @@ manage_block_port() {
         return 1
     fi
     
-    log_header "Blocking port $port (persistent)"
-    
-    # Add port to nftables runtime
+    log_header "Blocking port $port"
     if sudo nft add element inet docker-block docker-blocked-ports "{ $port }" 2>/dev/null; then
-        log_success "Port $port added to runtime"
+        log_success "Port $port blocked"
     else
-        log_warn "Port $port might already be in runtime set"
+        log_warn "Port $port might already be blocked or docker-block table missing"
     fi
-    
-    # Make it persistent - update config file
-    local NFT_DOCKER_CONF="/etc/nftables/docker-block.nft"
-    
-    if [ ! -f "$NFT_DOCKER_CONF" ]; then
-        log_error "Config file not found: $NFT_DOCKER_CONF"
-        return 1
-    fi
-    
-    # Get current ports from runtime
-    local CURRENT_PORTS
-    CURRENT_PORTS=$(sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null | \
-        grep -oE '[0-9]+' | sort -un | tr '\n' ',' | sed 's/,$//')
-    
-    if [ -z "$CURRENT_PORTS" ]; then
-        log_warn "No ports in runtime set"
-        return 0
-    fi
-    
-    # Backup config
-    sudo cp "$NFT_DOCKER_CONF" "${NFT_DOCKER_CONF}.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-    
-    # Update config file with elements
-    sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-    type inet_service\
-    flags interval\
-    auto-merge\
-    elements = { '"$CURRENT_PORTS"' }\
-}' "$NFT_DOCKER_CONF"
-    
-    log_success "Port $port persisted to $NFT_DOCKER_CONF"
-    log_info "Blocked ports: $CURRENT_PORTS"
-    
     echo ""
 }
 
@@ -545,55 +509,12 @@ manage_unblock_port() {
         return 1
     fi
     
-    log_header "Unblocking port $port (persistent)"
-    
-    # Remove port from nftables runtime
+    log_header "Unblocking port $port"
     if sudo nft delete element inet docker-block docker-blocked-ports "{ $port }" 2>/dev/null; then
-        log_success "Port $port removed from runtime"
+        log_success "Port $port unblocked"
     else
-        log_error "Port $port not found in runtime"
-        return 1
+        log_error "Port $port not found"
     fi
-    
-    # Make it persistent - update config file
-    local NFT_DOCKER_CONF="/etc/nftables/docker-block.nft"
-    
-    if [ ! -f "$NFT_DOCKER_CONF" ]; then
-        log_error "Config file not found: $NFT_DOCKER_CONF"
-        return 1
-    fi
-    
-    # Get current ports from runtime (after removal)
-    local CURRENT_PORTS
-    CURRENT_PORTS=$(sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null | \
-        grep -oE '[0-9]+' | sort -un | tr '\n' ',' | sed 's/,$//')
-    
-    # Backup config
-    sudo cp "$NFT_DOCKER_CONF" "${NFT_DOCKER_CONF}.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-    
-    # Update config file
-    if [ -z "$CURRENT_PORTS" ]; then
-        # No ports left - empty set
-        sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-    type inet_service\
-    flags interval\
-    auto-merge\
-    elements = { }\
-}' "$NFT_DOCKER_CONF"
-        log_success "Port $port removed - no ports left in set"
-    else
-        # Update with remaining ports
-        sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-    type inet_service\
-    flags interval\
-    auto-merge\
-    elements = { '"$CURRENT_PORTS"' }\
-}' "$NFT_DOCKER_CONF"
-        log_success "Port $port removed - remaining: $CURRENT_PORTS"
-    fi
-    
     echo ""
 }
 
@@ -644,54 +565,6 @@ manage_manual_unban() {
         log_success "Unbanned"
     else
         log_error "Not found"
-    fi
-    echo ""
-}
-
-
-
-manage_unban_all() {
-    local ip
-    ip="$1"
-    if [ -z "$ip" ]; then
-        log_error "Usage: manage unban-all <IP>"
-        return 1
-    fi
-
-    if ! validate_ip "$ip"; then
-        return 1
-    fi
-
-    log_header "Unbanning $ip from ALL jails"
-    echo ""
-
-    local found
-    found=0
-    local unbanned
-    unbanned=0
-
-    for jail in "${JAILS[@]}"; do
-        # Check if IP exists in jail
-        if sudo fail2ban-client status "$jail" 2>/dev/null | grep -q "$ip"; then
-            found=1
-            if sudo fail2ban-client set "$jail" unbanip "$ip" 2>/dev/null; then
-                log_success "[$jail] unbanned"
-                ((unbanned++))
-            else
-                log_warn "[$jail] failed to unban"
-            fi
-        fi
-    done
-
-    echo ""
-    if [ "$found" -eq 0 ]; then
-        log_warn "IP $ip not found in any jail"
-        return 0
-    else
-        log_success "Unbanned from $unbanned jail(s)"
-        log_info "Running sync to update nftables..."
-        f2b_sync_enhanced >/dev/null 2>&1
-        log_success "Sync completed"
     fi
     echo ""
 }
@@ -1098,7 +971,7 @@ stats_quick() {
 show_help() {
     cat << 'EOF'
 ═══════════════════════════════════════════════════════════════════
-         F2B UNIFIED WRAPPER v0.22
+         F2B UNIFIED WRAPPER v0.19
     Fail2Ban + nftables Complete Management
 ═══════════════════════════════════════════════════════════════════
 
@@ -1125,7 +998,6 @@ MANAGE - PORT BLOCKING:
 MANAGE - IP BAN/UNBAN:
   manage manual-ban <ip> [time]    Ban IP manually
   manage manual-unban <ip>         Unban IP
-  manage unban-all <IP>            Unban IP from ALL jails (NEW v0.22)
   
 MANAGE - SYSTEM:
   manage reload                    Reload firewall
@@ -1216,7 +1088,6 @@ main() {
                 docker-info) f2b_docker_info ;;
                 manual-ban) manage_manual_ban "$3" "$4" ;;
                 manual-unban) manage_manual_unban "$3" ;;
-                unban-all) manage_unban_all "$3" ;;
                 reload) manage_reload ;;
                 backup) manage_backup ;;
                 *) show_help ;;

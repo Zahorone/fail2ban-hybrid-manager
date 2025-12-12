@@ -2,9 +2,9 @@
 ################################################################################
 # COMPLETE REBUILD: nftables Fail2Ban Infrastructure
 # Vytvorí kompletnú nftables tabuľku, reťazce, sety a pravidlá
-# Version: 2.1 (enhanced for v0.21)
+# Version: 2.2 (enhanced for v0.22)
 # Date: 2025-12-06
-# Changelog: IPv4+IPv6 support, robustnejší banned list, fail2ban-client get
+# Changelog: IPv4+IPv6 support, robustnejší banned list, fail2ban-client get, added sshd-slowattack jail
 ################################################################################
 
 set -e
@@ -77,6 +77,7 @@ log_header "KROK 4: VYTVOR VŠETKY SETY (10 x IPv4 + IPv6)"
 
 SETS=(
     "f2b-sshd"
+    "f2b-sshd-slowattack"
     "f2b-exploit-critical"
     "f2b-dos-high"
     "f2b-web-medium"
@@ -144,55 +145,90 @@ log_success "FORWARD pravidlá pridané (6/6)"
 echo ""
 
 ################################################################################
-# KROK 6: MIGRÁCIA IP Z FAIL2BAN (robustnejší)
+# KROK 6: MIGRÁCIA IP Z FAIL2BAN (s ošetrením čistej inštalácie)
 ################################################################################
 
 log_header "KROK 6: MIGRÁCIA IP Z FAIL2BAN DO nftables"
 
-JAILS=(
-    "sshd:f2b-sshd"
-    "f2b-exploit-critical:f2b-exploit-critical"
-    "f2b-dos-high:f2b-dos-high"
-    "f2b-web-medium:f2b-web-medium"
-    "nginx-recon-bonus:f2b-nginx-recon-bonus"
-    "recidive:f2b-recidive"
-    "manualblock:f2b-manualblock"
-    "f2b-fuzzing-payloads:f2b-fuzzing-payloads"
-    "f2b-botnet-signatures:f2b-botnet-signatures"
-    "f2b-anomaly-detection:f2b-anomaly-detection"
-)
-
-for entry in "${JAILS[@]}"; do
-    IFS=':' read -r jail set <<< "$entry"
+# Skontroluj či fail2ban vôbec beží
+if ! systemctl is-active --quiet fail2ban 2>/dev/null; then
+    log_warn "Fail2ban nie je aktívny - preskakujem migráciu (čistá inštalácia)"
+    echo ""
+else
+    # Skontroluj či existujú nejaké jailly
+    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
     
-    # Použiť fail2ban-client get pre robustnejší výstup
-    IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
-    
-    if [ -z "$IPS" ]; then
-        continue
-    fi
-    
-    COUNT=$(echo "$IPS" | grep -c '^' 2>/dev/null || echo 0)
-    
-    if [ "$COUNT" -gt 0 ]; then
-        log_info "$jail -> $set ($COUNT IP)"
+    if [ "$ACTIVE_JAILS" -eq 0 ]; then
+        log_warn "Žiadne aktívne jailly - preskakujem migráciu (čistá inštalácia)"
+        log_info "Toto je OK pre prvú inštaláciu"
+        echo ""
+    else
+        log_info "Detekované $ACTIVE_JAILS aktívnych jailov, pokúsim sa migrovať IP..."
+        echo ""
         
-        while IFS= read -r ip; do
-            if [ -n "$ip" ]; then
-                echo -n "    • $ip ... "
-                
-                # Detect IPv4 vs IPv6
-                if echo "$ip" | grep -q ':'; then
-                    # IPv6
-                    sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v6)" || echo "⚠️"
-                else
-                    # IPv4
-                    sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v4)" || echo "⚠️"
-                fi
+        JAILS=(
+            "sshd:f2b-sshd"
+            "sshd-slowattack:f2b-sshd-slowattack"
+            "f2b-exploit-critical:f2b-exploit-critical"
+            "f2b-dos-high:f2b-dos-high"
+            "f2b-web-medium:f2b-web-medium"
+            "nginx-recon-bonus:f2b-nginx-recon-bonus"
+            "recidive:f2b-recidive"
+            "manualblock:f2b-manualblock"
+            "f2b-fuzzing-payloads:f2b-fuzzing-payloads"
+            "f2b-botnet-signatures:f2b-botnet-signatures"
+            "f2b-anomaly-detection:f2b-anomaly-detection"
+        )
+        
+        MIGRATED_COUNT=0
+        
+        for entry in "${JAILS[@]}"; do
+            IFS=':' read -r jail set <<< "$entry"
+            
+            # Skontroluj či jail existuje
+            if ! sudo fail2ban-client status "$jail" &>/dev/null; then
+                continue
             fi
-        done <<< "$IPS"
+            
+            # Získaj banned IP
+            IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
+            
+            if [ -z "$IPS" ]; then
+                continue
+            fi
+            
+            COUNT=$(echo "$IPS" | grep -c '^' 2>/dev/null || echo 0)
+            
+            if [ "$COUNT" -gt 0 ]; then
+                log_info "$jail -> $set ($COUNT IP)"
+                
+                while IFS= read -r ip; do
+                    if [ -n "$ip" ]; then
+                        echo -n "    • $ip ... "
+                        
+                        # Detect IPv4 vs IPv6
+                        if echo "$ip" | grep -q ':'; then
+                            # IPv6
+                            sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v6)" || echo "⚠️"
+                        else
+                            # IPv4
+                            sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout 604800s }" 2>/dev/null && echo "✅ (v4)" || echo "⚠️"
+                        fi
+                        ((MIGRATED_COUNT++))
+                    fi
+                done <<< "$IPS"
+            fi
+        done
+        
+        echo ""
+        
+        if [ "$MIGRATED_COUNT" -gt 0 ]; then
+            log_success "Migrovalo sa $MIGRATED_COUNT IP adries"
+        else
+            log_info "Žiadne IP na migráciu (čisté jailly)"
+        fi
     fi
-done
+fi
 
 echo ""
 
@@ -280,7 +316,7 @@ EXPECTED_CONF="#!/usr/sbin/nft -f
 
 flush ruleset
 
-# Fail2Ban nftables (v2.1 - IPv4+IPv6)
+# Fail2Ban nftables (v2.2 - IPv4+IPv6)
 include \"/etc/nftables.d/fail2ban-filter.nft\"
 
 # Docker port blocking (v0.3 - with loopback support)
@@ -319,13 +355,13 @@ log_success "✅ Konfigurácia je PERZISTENTNÁ (prežije reboot)"
 
 echo ""
 
-log_header "✅ COMPLETE REBUILD HOTOVÝ v2.1"
+log_header "✅ COMPLETE REBUILD HOTOVÝ v2.2"
 
 echo "📝 Nasledujúce boli vykonané:"
 echo "  1. Backup a odstránenie starej tabuľky"
 echo "  2. Vytvorenie novej tabuľky inet fail2ban-filter"
 echo "  3. Vytvorenie reťazcov INPUT a FORWARD"
-echo "  4. Vytvorenie všetkých 10 setov (IPv4 + IPv6)"
+echo "  4. Vytvorenie všetkých 11 setov (IPv4 + IPv6)"
 echo "  5. Pridanie DROP pravidiel (20 INPUT + 6 FORWARD)"
 echo "  6. Migrácia IP z Fail2Ban (robustnejší)"
 echo "  7. Reštart Fail2Ban"
@@ -338,5 +374,5 @@ echo ""
 echo "Test:"
 echo "  f2b sync"
 echo "  sudo nft list chain inet fail2ban-filter f2b-input | grep drop | wc -l"
-echo "  (mal by vrátiť 20, nie 10)"
+echo "  (mal by vrátiť 22, nie 11)"
 echo ""

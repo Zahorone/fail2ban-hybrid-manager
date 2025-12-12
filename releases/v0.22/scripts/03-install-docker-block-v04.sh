@@ -1,10 +1,9 @@
 #!/bin/bash
+
 ################################################################################
-# Docker Port Blocking v0.3 - Standalone (FIXED)
-# Works with nftables-rebuild v2.1
-# Creates PERSISTENT configuration via /etc/nftables/docker-block.nft
-# Preserves existing /etc/nftables.conf if correct, creates/fixes if needed
-# Embedded docker-block logic - no external dependencies
+# Docker Port + IP Blocking v0.4 - WITH FAIL2BAN INTEGRATION (FIXED)
+# Extends v0.3 with IP address blocking for Docker containers
+# Uses prerouting hook to catch IPs BEFORE Docker NAT
 ################################################################################
 
 set -e
@@ -15,14 +14,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log()    { echo -e "${GREEN}[OK]${NC} $1"; }
-error()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+log() { echo -e "${GREEN}[OK]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 warning(){ echo -e "${YELLOW}[WARN]${NC} $1"; }
-info()   { echo -e "${BLUE}[INFO]${NC} $1"; }
+info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 echo ""
 echo "══════════════════════════════════════════════════════════"
-echo "  Docker Port Blocking Setup v0.3 (Standalone)"
+echo "   Docker Port + IP Blocking Setup v0.4 (FIXED)"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
@@ -31,30 +30,52 @@ if [ "$EUID" -ne 0 ]; then
     error "Please run with sudo"
 fi
 
-# Auto-fix mode (non-interactive)
 DOCKER_BLOCK_AUTOFIX=1
 
 ################################################################################
-# STEP 1: CREATE DOCKER-BLOCK NFT FILE
+# STEP 1: CREATE DOCKER-BLOCK NFT FILE (WITH IP BLOCKING)
 ################################################################################
 
 info "Step 1: Creating /etc/nftables/docker-block.nft..."
+
 mkdir -p /etc/nftables
 
 cat > /etc/nftables/docker-block.nft << 'EOF'
 #!/usr/sbin/nft -f
-# Docker Port Blocking v0.3
-# Blocks external access to Docker ports while allowing localhost
+
+# Docker Port + IP Blocking v0.4
+# Blocks external access to Docker ports AND banned IPs
 
 table inet docker-block {
+    # Set for blocked ports
     set docker-blocked-ports {
         type inet_service
         flags interval
         auto-merge
     }
 
+    # Set for banned IPv4 addresses (from fail2ban)
+    set docker-banned-ipv4 {
+        type ipv4_addr
+        flags interval, timeout
+        auto-merge
+        timeout 7d
+    }
+
+    # Set for banned IPv6 addresses (from fail2ban)
+    set docker-banned-ipv6 {
+        type ipv6_addr
+        flags interval, timeout
+        auto-merge
+        timeout 7d
+    }
+
     chain prerouting {
         type filter hook prerouting priority dstnat; policy accept;
+
+        # CRITICAL: Drop banned IPs FIRST (before any NAT)
+        ip saddr @docker-banned-ipv4 drop
+        ip6 saddr @docker-banned-ipv6 drop
 
         # Allow localhost to access Docker ports
         iif "lo" return
@@ -72,7 +93,7 @@ EOF
 chown root:root /etc/nftables/docker-block.nft
 chmod 644 /etc/nftables/docker-block.nft
 
-log "/etc/nftables/docker-block.nft created"
+log "/etc/nftables/docker-block.nft created (with IP blocking)"
 echo ""
 
 ################################################################################
@@ -88,7 +109,6 @@ if [ ! -f /etc/nftables.conf ]; then
     warning "/etc/nftables.conf does not exist"
     CORRECT_STRUCTURE=false
 else
-    # Check for required components
     if ! grep -q "flush ruleset" /etc/nftables.conf; then
         warning "Missing 'flush ruleset' in /etc/nftables.conf"
         CORRECT_STRUCTURE=false
@@ -111,7 +131,7 @@ fi
 
 if [ "$CORRECT_STRUCTURE" != true ] && [ "$DOCKER_BLOCK_AUTOFIX" = 1 ]; then
     info "Creating/fixing /etc/nftables.conf..."
-
+    
     cat > /etc/nftables.conf << 'EOF'
 #!/usr/sbin/nft -f
 
@@ -120,12 +140,13 @@ flush ruleset
 # Fail2Ban nftables (v2.1)
 include "/etc/nftables.d/fail2ban-filter.nft"
 
-# Docker port blocking (v0.3)
+# Docker port + IP blocking (v0.4)
 include "/etc/nftables/docker-block.nft"
 EOF
 
     chown root:root /etc/nftables.conf
     chmod 644 /etc/nftables.conf
+    
     log "/etc/nftables.conf created/fixed"
 elif [ "$CORRECT_STRUCTURE" = true ]; then
     log "/etc/nftables.conf is correctly configured"
@@ -141,10 +162,11 @@ echo ""
 ################################################################################
 
 info "Step 3: Testing nftables configuration..."
+
 if nft -c -f /etc/nftables.conf 2>&1; then
     log "nftables configuration is valid"
 else
-    error "nftables configuration has errors - check manually: sudo nft -f /etc/nftables.conf"
+    error "nftables configuration has errors"
 fi
 
 echo ""
@@ -155,7 +177,6 @@ echo ""
 
 info "Step 4: Loading docker-block table..."
 
-# Load the docker-block table
 if nft -f /etc/nftables/docker-block.nft 2>&1; then
     log "docker-block table loaded successfully"
 else
@@ -186,28 +207,34 @@ echo ""
 info "Step 6: Verifying installation..."
 echo ""
 
-# Check if table exists
+# Check table
 if nft list table inet docker-block &>/dev/null; then
     log "✓ Table inet docker-block exists"
 else
     warning "✗ Table inet docker-block NOT found"
 fi
 
-# Check if docker-blocked-ports set exists
+# Check port set
 if nft list set inet docker-block docker-blocked-ports &>/dev/null; then
-    log "✓ Set docker-blocked-ports exists"
-
-    # Show current blocked ports
-    BLOCKED=$(nft list set inet docker-block docker-blocked-ports 2>/dev/null \
-        | sed -n '/elements = {/,/}/p' | grep -oE '[0-9]+' | tr '\n' ',' | sed 's/,$//')
-
-    if [ -z "$BLOCKED" ]; then
-        info "  Currently no ports blocked (empty set)"
-    else
-        info "  Currently blocked ports: $BLOCKED"
-    fi
+    log "✓ Set docker-blocked-ports exists (empty - ready to use)"
 else
     warning "✗ Set docker-blocked-ports NOT found"
+fi
+
+# Check IP sets
+if nft list set inet docker-block docker-banned-ipv4 &>/dev/null; then
+    log "✓ Set docker-banned-ipv4 exists (ready for fail2ban sync)"
+    
+    BANNED=$(nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
+    
+    if [ "$BANNED" -eq 0 ]; then
+        info "   Currently 0 banned IPs"
+    else
+        info "   Currently $BANNED banned IPs"
+    fi
+else
+    warning "✗ Set docker-banned-ipv4 NOT found"
 fi
 
 echo ""
@@ -217,30 +244,28 @@ echo ""
 ################################################################################
 
 echo "══════════════════════════════════════════════════════════"
-log "✅ Docker Port Blocking Setup Complete"
+log "✅ Docker Port + IP Blocking Setup Complete"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 echo "Files created/updated:"
-echo "  • /etc/nftables/docker-block.nft"
+echo "  • /etc/nftables/docker-block.nft (v0.4 - with IP blocking)"
 echo "  • /etc/nftables.conf (verified/created)"
 echo ""
-echo "Behavior:"
-echo "  ✓ localhost (127.0.0.1) → ALLOWED"
-echo "  ✓ Docker bridge (docker0) → ALLOWED"
-echo "  ✗ External IPs → BLOCKED (for ports in set)"
+echo "Features:"
+echo "  ✓ Port blocking (external → blocked)"
+echo "  ✓ IP blocking (banned IPs → dropped in PREROUTING)"
+echo "  ✓ Docker NAT bypass protection"
 echo ""
-echo "Manage Docker ports with f2b wrapper:"
-echo "  f2b manage list-blocked-ports"
-echo "  f2b manage block-port 8081"
-echo "  f2b manage unblock-port 8081"
-echo "  f2b manage docker-info"
+echo "IP management (manual):"
+echo "  # Add banned IP (with 1h timeout):"
+echo "  sudo nft add element inet docker-block docker-banned-ipv4 { 194.154.241.170 timeout 1h }"
 echo ""
-echo "Manual management (if needed):"
-echo "  nft add element inet docker-block docker-blocked-ports { 8081 }"
-echo "  nft delete element inet docker-block docker-blocked-ports { 8081 }"
-echo "  nft list set inet docker-block docker-blocked-ports"
+echo "  # List all banned IPs:"
+echo "  sudo nft list set inet docker-block docker-banned-ipv4"
+echo ""
+echo "  # Remove IP:"
+echo "  sudo nft delete element inet docker-block docker-banned-ipv4 { 194.154.241.170 }"
 echo ""
 echo "Test reload:"
 echo "  sudo nft -f /etc/nftables.conf"
 echo ""
-
