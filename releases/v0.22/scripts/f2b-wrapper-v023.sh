@@ -538,7 +538,7 @@ f2b_sync_docker() {
         [ -z "$IP" ] && continue
 
         if ! echo "$DOCKER_IPS" | grep -q "^$IP$"; then
-            sudo nft add element inet docker-block docker-banned-ipv4 { "$IP" timeout 1h } 2>/dev/null || true
+            sudo nft add element inet docker-block docker-banned-ipv4 "{ $IP timeout 1h }" 2>/dev/null || true
             echo "[$(date +'%Y-%m-%d %H:%M:%S')] ADDED: $IP" | tee -a "$LOG_FILE"
         fi
     done <<< "$F2B_IPS"
@@ -548,7 +548,7 @@ f2b_sync_docker() {
         [ -z "$IP" ] && continue
 
         if ! echo "$F2B_IPS" | grep -q "^$IP$"; then
-            sudo nft delete element inet docker-block docker-banned-ipv4 { "$IP" } 2>/dev/null || true
+            sudo nft delete element inet docker-block docker-banned-ipv4 "{ $IP }" 2>/dev/null || true
             echo "[$(date +'%Y-%m-%d %H:%M:%S')] REMOVED: $IP (no longer in fail2ban)" | tee -a "$LOG_FILE"
         fi
     done <<< "$DOCKER_IPS"
@@ -576,7 +576,7 @@ f2b_sync_docker() {
         [ -z "$IP" ] && continue
 
         if ! echo "$DOCKER_IPS" | grep -q "^$IP$"; then
-            sudo nft add element inet docker-block docker-banned-ipv6 { "$IP" timeout 1h } 2>/dev/null || true
+            sudo nft add element inet docker-block docker-banned-ipv6 "{ $IP timeout 1h }" 2>/dev/null || true
             echo "[$(date +'%Y-%m-%d %H:%M:%S')] ADDED (IPv6): $IP" | tee -a "$LOG_FILE"
         fi
     done <<< "$F2B_IPS"
@@ -586,7 +586,7 @@ f2b_sync_docker() {
         [ -z "$IP" ] && continue
 
         if ! echo "$F2B_IPS" | grep -q "^$IP$"; then
-            sudo nft delete element inet docker-block docker-banned-ipv6 { "$IP" } 2>/dev/null || true
+            sudo nft delete element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
             echo "[$(date +'%Y-%m-%d %H:%M:%S')] REMOVED (IPv6): $IP (no longer in fail2ban)" | tee -a "$LOG_FILE"
         fi
     done <<< "$DOCKER_IPS"
@@ -1164,7 +1164,7 @@ monitor_show_bans() {
             ips=$(get_f2b_ips "$j")
             if [ -n "$ips" ]; then
                 echo "$j:"
-                echo "$ips" | sed 's/^/ /'
+                printf ' %s\n' "$ips"
                 echo ""
             fi
         done
@@ -1173,7 +1173,7 @@ monitor_show_bans() {
         ips=$(get_f2b_ips "$jail")
         if [ -n "$ips" ]; then
             echo "$jail:"
-            echo "$ips" | sed 's/^/ /'
+            printf ' %s\n' "$ips"
         else
             log_warn "No IPs banned in $jail"
         fi

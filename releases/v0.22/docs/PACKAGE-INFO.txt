@@ -1,13 +1,14 @@
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
-║    Fail2Ban + nftables v0.21 - ShellCheck Compliance Release   ║
+║    Fail2Ban + nftables v0.22 - Clean Install & Path Fix        ║
 ║      Complete IPv4 + IPv6 Dual-Stack Security System           ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 
-VERSION: 0.21
-RELEASE DATE: December 2025
+VERSION: 0.22
+RELEASE DATE: December 12, 2025
 LICENSE: MIT
+
 
 ═══════════════════════════════════════════════════════════════════
 PACKAGE CONTENTS
@@ -16,20 +17,21 @@ PACKAGE CONTENTS
 📦 TOTAL FILES: 29
 
 INSTALLER:
-  ✅ INSTALL-ALL-v021.sh              Universal installer (auto-detect upgrade)
+  ✅ INSTALL-ALL-v022.sh              Universal installer (auto-detect upgrade)
 
-SCRIPTS (9):
+SCRIPTS (10):
   ✅ 00-pre-cleanup-v021.sh           Pre-installation cleanup & backup
-  ✅ 01-install-nftables-v021.sh      nftables infrastructure (IPv4+IPv6)
-  ✅ 02-install-jails-v021.sh         Jail + filter installer (automatic)
-  ✅ 02-verify-jails-v021.sh          Jail verifier (diagnostic tool)
-  ✅ 03-install-docker-block-v03.sh   Docker port blocking v0.3
-  ✅ 04-install-wrapper-v021.sh       F2B wrapper installer
+  ✅ 01-install-nftables-v022.sh      nftables infrastructure (IPv4+IPv6) [UPDATED]
+  ✅ 02-install-jails-v022.sh         Jail + filter installer (automatic) [UPDATED]
+  ✅ 02-verify-jails-v022.sh          Jail verifier (diagnostic tool) [UPDATED]
+  ✅ 03-install-docker-block-v04.sh   Docker port + IP blocking (PREROUTING, v0.4)
+  ✅ 04-install-wrapper-v023.sh       F2B wrapper installer
   ✅ 05-install-auto-sync.sh          Auto-sync service (hourly)
-  ✅ 06-install-aliases.sh            Bash aliases
-  ✅ f2b-wrapper-v021.sh              Main wrapper (43 functions, 1060 lines)
+  ✅ 06-install-aliases-v023.sh       Bash aliases
+  ✅ 07-setup-docker-sync-cron.sh     Cron sync fail2ban ↔ docker-block (1 min)
+  ✅ f2b-wrapper-v023.sh              Main wrapper (docker sync + dashboard)
 
-FILTERS (10):
+FILTERS (11):
   ✅ sshd.conf                        SSH brute-force (multi-mode)
   ✅ f2b-exploit-critical.conf        Critical CVE exploits
   ✅ f2b-dos-high.conf                DoS/DDoS attacks
@@ -37,13 +39,15 @@ FILTERS (10):
   ✅ nginx-recon-optimized.conf       Nginx reconnaissance
   ✅ f2b-fuzzing-payloads.conf        Fuzzing detection
   ✅ f2b-botnet-signatures.conf       Botnet signatures
-  ✅ f2b-anomaly-detection.conf       Anomaly patterns
+  ✅ f2b-anomaly-detection.conf       Anomaly patterns [NEW in v0.22]
   ✅ manualblock.conf                 Manual IP banning
   ✅ recidive.conf                    Repeat offenders
+  ✅ sshd-slowattack filter           (included in sshd.conf)
 
-CONFIGURATION (2):
-  ✅ jail.local                       10 jails configuration
-  ✅ nginx-recon-optimized.local      Nginx jail config
+CONFIGURATION (3):
+  ✅ jail.local                       11 jails configuration
+  ✅ nginx-recon-optimized.local      Filter extension (ignoreregex)
+  ✅ f2b-anomaly-detection.local      Filter extension (ignoreregex) [NEW]
 
 DOCUMENTATION (4):
   ✅ README.md                        Complete usage guide
@@ -66,23 +70,34 @@ FEATURES
   • 6 FORWARD rules (3 + 3)
 
 🚨 DETECTION:
-  • 10 Fail2Ban jails with optimized triggers
-  • 10 advanced detection filters
+  • 11 Fail2Ban jails with optimized triggers (was 10)
+  • 11 advanced detection filters (was 10)
   • Multi-layered threat detection
   • Automatic IP banning
 
 🔧 MANAGEMENT:
-  • F2B Wrapper v0.21 with 43 functions
+  • F2B Wrapper v0.22/v0.23 with 50+ functions
   • Core: status, audit, find, version
-  • Sync: check, enhanced, force, silent
-  • Manage: ports, IPs, reload, backup
-  • Monitor: watch, trends, top-attackers, jail-log
+  • Sync: check, enhanced, force, silent, docker
+  • Manage: ports (block/unblock/list), IPs (manual-ban/manual-unban/unban-all)
+  • Monitor: watch, trends, top-attackers, jail-log, docker dashboard
   • Reports: JSON, CSV, daily
 
-🐋 DOCKER INTEGRATION:
-  • Docker port blocking v0.3
-  • External access blocking (localhost allowed)
-  • Dynamic port management
+🐋 DOCKER INTEGRATION (v0.22/v0.23):
+  • Docker port blocking v0.4 (nftables table inet docker-block)
+  • PREROUTING hook – blokuje IP ešte pred Docker NAT
+  • Sets:
+      - docker-blocked-ports     (blokované služby)
+      - docker-banned-ipv4/v6    (IP z Fail2Ban + manuálne)
+  • f2b wrapper v0.22/0.23:
+      - manage block-port / unblock-port / list-blocked-ports
+      - manage manual-ban / manual-unban (manuálne IP do f2b-manualblock)
+      - f2b find <IP> ukáže aj prítomnosť v docker-block (v0.23)
+  • 07-setup-docker-sync-cron.sh:
+      - Cron job: `*/1 * * * * f2b sync docker`
+      - Každú minútu syncne banned IPs → docker-banned-ipv4
+      - Čistí expirované IP a loguje do /var/log/f2b-docker-sync.log
+
 
 ⚙️  AUTOMATION:
   • Auto-sync service (hourly)
@@ -108,6 +123,22 @@ QUICK START (3 steps):
    sudo f2b status
    sudo nft list chain inet fail2ban-filter f2b-input | grep -c drop
    # Expected: 20
+
+═══════════════════════════════════════════════════════════════════
+UPGRADE FROM v0.21 TO v0.22
+═══════════════════════════════════════════════════════════════════
+
+Automatic upgrade detection:
+  sudo bash INSTALL-ALL-v022.sh
+
+Changes in v0.22:
+  • Fixed clean install support (no more errors on fresh servers)
+  • Fixed path resolution (scripts find config/ and filters/ correctly)
+  • Added 11th jail: f2b-anomaly-detection
+  • Fixed filter .local files going to filter.d (not jail.d)
+  • Enhanced error handling and logging
+
+The installer preserves all existing bans during upgrade.
 
 ═══════════════════════════════════════════════════════════════════
 UPGRADE FROM v0.19/v0.20
@@ -141,28 +172,39 @@ For production servers with custom requirements:
    sudo bash scripts/02-verify-jails-v021.sh
 
 ═══════════════════════════════════════════════════════════════════
-TWO-SCRIPT APPROACH
+TWO-SCRIPT APPROACH + PATH RESOLUTION (v0.22)
 ═══════════════════════════════════════════════════════════════════
 
-02-install-jails-v021.sh:
+02-install-jails-v022.sh:
   • Full automated installer
+  • Proper path resolution (scripts/ → parent dir → config/ & filters/)
   • Copies jail.local to /etc/fail2ban/
-  • Copies ALL 10 filters to /etc/fail2ban/filter.d/
+  • Copies ALL 11 filters to /etc/fail2ban/filter.d/
+  • Installs *.local configs to filter.d (not jail.d)
+  • Idempotent with automatic backup
   • Validates configuration
   • Restarts Fail2Ban
-  • Used by INSTALL-ALL-v020.sh
+  • Used by INSTALL-ALL-v022.sh
 
-02-verify-jails-v021.sh:
+02-verify-jails-v022.sh:
   • Diagnostic verification tool
   • Non-invasive (read-only)
-  • Checks banaction configuration
+  • Checks all 11 jails (including sshd-slowattack, f2b-anomaly-detection)
+  • Validates banaction configuration
   • Validates nftables integration
   • Reports configuration status
   • Used for troubleshooting
 
+01-install-nftables-v022.sh:
+  • Conditional fail2ban operations (clean install support)
+  • Only restarts fail2ban if service exists and has jails
+  • Skip sync check if fail2ban not running
+  • Enhanced logging for clean install vs upgrade
+
 Use case:
-  • Automatic install → 02-install-jails-v021.sh
-  • Manual config + verify → 02-verify-jails-v021.sh
+  • Clean install (no fail2ban) → Works perfectly ✅
+  • Automatic install → 02-install-jails-v022.sh
+  • Manual config + verify → 02-verify-jails-v022.sh
 
 ═══════════════════════════════════════════════════════════════════
 SYSTEM REQUIREMENTS
@@ -253,26 +295,35 @@ GitHub:
 VERSION COMPARISON
 ═══════════════════════════════════════════════════════════════════
 
-                        v0.18    v0.19    v0.20/v0.21
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-IPv4 Support            ✅       ✅       ✅
-IPv6 Support            ❌       ❌       ✅
-nftables Sets           10       10       20
-INPUT Rules             10       10       20
-FORWARD Rules           3        3        6
-Fail2Ban Jails          10       10       10
-Detection Filters       10       10       10
-F2B Wrapper Functions   35       43       43
-Lock Mechanism          ❌       ✅       ✅
-Attack Trends           ❌       ✅       ✅
-JSON/CSV Export         ❌       ✅       ✅
-Dual Install Scripts    ❌       ❌       ✅
-Universal Installer     ❌       ❌       ✅
-Auto-Upgrade Detection  ❌       ❌       ✅
+                        v0.18    v0.19    v0.20/v0.21    v0.22/v0.23
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IPv4 Support            ✅       ✅       ✅             ✅
+IPv6 Support            ❌       ❌       ✅             ✅
+nftables Sets           10       10       20            22
+INPUT Rules             10       10       20            22
+FORWARD Rules           3        3        6             6
+Fail2Ban Jails          10       10       10            11
+Detection Filters       10       10       10            11
+F2B Wrapper Functions   35       43       43            50+*
+Lock Mechanism          ❌       ✅       ✅             ✅
+Attack Trends           ❌       ✅       ✅             ✅
+JSON/CSV Export         ❌       ✅       ✅             ✅
+Dual Install Scripts    ❌       ❌       ✅             ✅
+Universal Installer     ❌       ❌       ✅             ✅
+Auto-Upgrade Detection  ❌       ❌       ✅             ✅
+Docker Port Blocking    ❌       ❌       v0.3          v0.4 (PREROUTING + IP)
+Docker Auto-Sync        ❌       ❌       ❌             ✅ (cron + f2b sync docker)
+
 
 ═══════════════════════════════════════════════════════════════════
 CHANGELOG HIGHLIGHTS
 ═══════════════════════════════════════════════════════════════════
+
+v0.22/v0.23:
+  ✅ docker-block v0.4 – IP drop v PREROUTING (aj pre Docker kontajnery)
+  ✅ f2b sync docker – prenáša všetky banned IP do docker-banned-ipv4
+  ✅ 07-setup-docker-sync-cron.sh – každú minútu automatický sync
+  ✅ f2b docker dashboard / info – štatistiky docker-block tabuľky
 
 v0.20/v0.21 (2025-12-04):
   ✅ Full IPv6 support added

@@ -125,6 +125,76 @@ See [MIGRATION-GUIDE.md](MIGRATION-GUIDE.md) for details.
 
 ## Roadmap
 
+## [0.22] - 2025-12-12
+
+### 🎯 Clean Install & Path Resolution Fix
+
+Critical fixes for clean installations and proper path handling in modular structure.
+
+### Fixed
+- **Clean Install Support**
+  - `01-install-nftables-v022.sh`: Conditional fail2ban restart (only if service exists and has jails)
+  - `02-install-jails-v022.sh`: Proper path resolution from parent directory
+  - KROK 7/8 in nftables script now skip fail2ban operations if service not yet installed
+  - No more errors during fresh installations
+
+- **Path Resolution**
+  - Scripts now correctly resolve paths when called from `INSTALL-ALL-v022.sh`
+  - `PARENTDIR` detection: `scripts/` → `v0.22/` → finds `config/` and `filters/`
+  - Fixed: filters not found when scripts run from `scripts/` subdirectory
+
+- **Filter Installation Logic**
+  - `nginx-recon-optimized.local` → `/etc/fail2ban/filter.d/` (not `jail.d`)
+  - `f2b-anomaly-detection.local` → `/etc/fail2ban/filter.d/` (not `jail.d`)
+  - Both files now treated as filter extensions (ignoreregex), not jail configs
+  - Idempotent filter installation with automatic backup
+
+### Changed
+- **02-install-jails-v022.sh**
+  - Updated from v021 to v022
+  - Added 11th jail support (f2b-anomaly-detection)
+  - Improved error handling and logging
+  - Better file detection with fallbacks
+  - Enhanced confirmation prompts showing exact target paths
+
+- **02-verify-jails-v022.sh**
+  - Added `sshd-slowattack` check
+  - Added `f2b-anomaly-detection` check
+  - Enhanced runtime status checks
+  - Better error handling when fail2ban not running
+  - Improved nftables integration verification
+
+- **01-install-nftables-v022.sh**
+  - Conditional KROK 7: Only restart fail2ban if service exists and has jails
+  - Conditional KROK 8: Only check sync if fail2ban is active
+  - Added detailed nftables structure verification (counts sets, rules)
+  - Better messaging for clean install vs upgrade scenarios
+
+### Added
+- **Robust Installation Flow**
+  - Pre-checks before each critical operation
+  - Graceful handling of missing services
+  - Clear messaging for clean install vs upgrade paths
+  - Detailed logging of what was installed where
+
+### Jails
+- Total jails: **11** (was 10 in v0.21)
+  - Added: `f2b-anomaly-detection` (anomaly pattern detection)
+  - Existing: sshd, sshd-slowattack, f2b-exploit-critical, f2b-dos-high, f2b-web-medium, nginx-recon-bonus, recidive, manualblock, f2b-fuzzing-payloads, f2b-botnet-signatures
+
+### Filters
+- Total filters: **11** (was 10 in v0.21)
+  - Added: `f2b-anomaly-detection.conf`
+  - Extra configs: `nginx-recon-optimized.local`, `f2b-anomaly-detection.local` (both → filter.d)
+
+### Compatibility
+- ✅ Clean install support (fresh servers)
+- ✅ Upgrade from v0.21 (preserves bans)
+- ✅ Proper modular directory structure
+- ✅ All scripts work from parent installer
+
+---
+
 ## v0.21 - ShellCheck Compliance Release (2025-12-06)
 
 ### Changes

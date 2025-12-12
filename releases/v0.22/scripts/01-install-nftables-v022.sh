@@ -156,7 +156,7 @@ if ! systemctl is-active --quiet fail2ban 2>/dev/null; then
     echo ""
 else
     # Skontroluj či existujú nejaké jailly
-    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
+    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -cv '^[[:space:]]*$' || echo 0)
     
     if [ "$ACTIVE_JAILS" -eq 0 ]; then
         log_warn "Žiadne aktívne jailly - preskakujem migráciu (čistá inštalácia)"
@@ -247,7 +247,7 @@ else
     # Fail2ban service existuje, skontroluj či beží
     if systemctl is-active --quiet fail2ban 2>/dev/null; then
         # Skontroluj či má nejaké jails
-        ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
+        ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -cv '^[[:space:]]*$' || echo 0)
         
         if [ "$ACTIVE_JAILS" -gt 0 ]; then
             log_info "Reštartujem Fail2Ban (detekované $ACTIVE_JAILS jails)..."
@@ -315,7 +315,7 @@ echo ""
 
 # CONDITIONAL: Kontrola fail2ban sync iba ak existujú jails
 if systemctl is-active --quiet fail2ban 2>/dev/null; then
-    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -v '^[[:space:]]*$' | wc -l || echo 0)
+    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://' | tr ',' '\n' | grep -cv '^[[:space:]]*$' || echo 0)
     
     if [ "$ACTIVE_JAILS" -gt 0 ]; then
         log_info "Kontrola fail2ban ↔ nftables sync (sample: f2b-dos-high):"
