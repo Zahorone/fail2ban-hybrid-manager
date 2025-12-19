@@ -1,0 +1,158 @@
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║    Fail2Ban + nftables v0.30 - Production Bundle               ║
+║      One-Click IPv4 + IPv6 + Docker-Block Security System      ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+VERSION: 0.30
+RELEASE DATE: December 19, 2025
+UPGRADE FROM: v0.19–v0.24 (auto-detect)
+LICENSE: MIT
+
+
+═══════════════════════════════════════════════════════════════════
+KEY CHANGES IN v0.30
+═══════════════════════════════════════════════════════════════════
+
+🚀 ONE-CLICK INSTALLER:
+  ✅ New universal installer: INSTALL-ALL-v030.sh
+     • Detects fresh install / upgrade / reinstall
+     • Orchestrates all components (nftables, jails, wrapper, docker-block)
+     • Safe pre-cleanup + full backup before changes
+  ✅ --cleanup-only mode:
+     • Runs 00-pre-cleanup-v030.sh only
+     • No firewall/jail modifications
+     • Ideal for first test on production
+
+🧩 CONSOLIDATED v0.30 STRUCTURE:
+  ✅ Finalized nftables layout:
+     • 11 IPv4 sets + 11 IPv6 sets (f2b-*)
+     • 22 INPUT rules (11 IPv4 + 11 IPv6)
+     • 6 FORWARD rules (backend protection)
+  ✅ 11 Fail2Ban jails + 11 detection filters:
+     • sshd, sshd-slowattack
+     • f2b-exploit-critical, f2b-dos-high, f2b-web-medium
+     • nginx-recon-bonus, recidive, manualblock
+     • f2b-fuzzing-payloads, f2b-botnet-signatures, f2b-anomaly-detection
+
+📊 WRAPPER v0.30 (50+ FUNCTIONS):
+  ✅ Enhanced reporting & analysis:
+     • f2b report attack-analysis
+     • --npm-only / --ssh-only modes
+  ✅ Improved sync & monitoring:
+     • f2b sync check/enhanced/force/silent/docker
+     • f2b monitor watch/top-attackers/trends/jail-log
+  ✅ ShellCheck-clean code:
+     • Fixed SC2034/SC2086/SC2126/SC2155/SC2188/SC1083
+     • Unified metadata header (RELEASE/VERSION/BUILD_DATE/COMPONENT_NAME)
+
+🐋 DOCKER-BLOCK v0.4 + AUTO-SYNC:
+  ✅ docker-block table (inet docker-block):
+     • docker-blocked-ports (service ports)
+     • docker-banned-ipv4 / docker-banned-ipv6
+  ✅ Auto-sync:
+     • Systemd service for Fail2Ban ↔ nftables sync
+     • Cron job: every minute docker sync
+  ✅ Wrapper commands:
+     • f2b docker dashboard / info / sync
+     • f2b manage block-port / unblock-port / list-blocked-ports
+
+🧹 SAFE PRE-CLEANUP:
+  ✅ 00-pre-cleanup-v030.sh:
+     • Backups: nftables ruleset + fail2ban configs
+     • Cleanup legacy systemd units, cron entries, aliases
+     • FORCE cleanup (optional) for full reinstall
+     • VERIFICATION snapshot at the end (tables, units, cron)
+
+
+═══════════════════════════════════════════════════════════════════
+PACKAGE CONTENTS (v0.30)
+═══════════════════════════════════════════════════════════════════
+
+📦 ROOT:
+  ✅ INSTALL-ALL-v030.sh              Universal installer (one-click)
+  ✅ README-v030.md                   Main usage guide
+  ✅ CHANGELOG-v030.md                Version history
+  ✅ MIGRATION-GUIDE.md               Upgrade instructions (v0.19–v0.24 → v0.30)
+  ✅ PACKAGE-INFO-v030.txt            This file
+
+📂 scripts/ (core logic):
+  ✅ 00-pre-cleanup-v030.sh           Pre-install cleanup, backup, legacy removal
+  ✅ 01-install-nftables-v030.sh      nftables infrastructure (11+11 sets, 22+6 rules)
+  ✅ 02-install-jails-v030.sh         Jails + filters + actions installer
+  ✅ 02-verify-jails-v030.sh          Post-install verifier (banactions, timeouts)
+  ✅ 03-install-docker-block-v030.sh  Docker port + IP blocking (v0.4)
+  ✅ 04-install-wrapper-v030.sh       F2B wrapper installer (v0.30)
+  ✅ 05-install-auto-sync-v030.sh     Auto-sync service (Fail2Ban ↔ nftables)
+  ✅ 06-install-aliases-v030.sh       Minimal f2b-* aliases (optional)
+  ✅ 07-setup-docker-sync-cron-v030.sh Docker-block sync cron (every minute)
+  ✅ f2b-wrapper-v030.sh              Main wrapper (50+ functions)
+
+📂 filters/ (11 detection filters):
+  ✅ sshd.conf                        SSH brute-force (multi-mode)
+  ✅ f2b-exploit-critical.conf        Critical exploit scanners
+  ✅ f2b-dos-high.conf                DoS/DDoS patterns
+  ✅ f2b-web-medium.conf              Web attacks (SQLi, path traversal, etc.)
+  ✅ nginx-recon-optimized.conf       Nginx reconnaissance
+  ✅ f2b-fuzzing-payloads.conf        Fuzzing payloads
+  ✅ f2b-botnet-signatures.conf       Botnet/scanner signatures
+  ✅ f2b-anomaly-detection.conf       Anomaly patterns
+  ✅ manualblock.conf                 Manual IP banning
+  ✅ recidive.conf                    Recidive jail (30d ban)
+  ✅ sshd-slowattack filter           (included in sshd.conf)
+
+📂 config/ (custom config):
+  ✅ jail.local                       11 jails (correct banaction mapping)
+  ✅ nginx-recon-optimized.local      Filter extension (ignoreregex)
+  ✅ f2b-anomaly-detection.local      Filter extension (ignoreregex)
+
+📂 action.d/ (nftables actions):
+  ⭐ nftables-common.local            Table override (inet fail2ban-filter) [CRITICAL]
+  ⭐ nftables-multiport.conf          Generic 7d action (IPv4+IPv6)
+  ⭐ nftables-recidive.conf           30d recidive action (FORWARD + INPUT)
+
+
+═══════════════════════════════════════════════════════════════════
+UPGRADE PATHS
+═══════════════════════════════════════════════════════════════════
+
+FROM v0.19 / v0.20:
+  ✅ Use MIGRATION-GUIDE (legacy) to reach v0.20/v0.22
+  ✅ Then run v0.30 installer (INSTALL-ALL-v030.sh)
+  ✅ Preserves all IPv4 bans, adds/maintains IPv6 structure
+
+FROM v0.21 / v0.22 / v0.24:
+  ✅ Directly run INSTALL-ALL-v030.sh
+  ✅ Installer detects existing structure:
+     • If IPv6 missing → upgrade_old path
+     • If full v0.22+ structure → reinstall path
+  ✅ All bans and core nftables structure preserved
+
+CLEAN INSTALL (new server):
+  ✅ INSTALL-ALL-v030.sh:
+     • Creates full nftables + Fail2Ban + Docker-block + sync setup
+     • Configures auto-sync + docker-block cron
+     • Adds minimal wrapper aliases (optional)
+
+
+═══════════════════════════════════════════════════════════════════
+QUICK VERIFY AFTER INSTALL (v0.30)
+═══════════════════════════════════════════════════════════════════
+
+1) Check nftables structure
+sudo nft list table inet fail2ban-filter
+
+2) Check jails
+sudo fail2ban-client status
+
+3) Wrapper & sync
+sudo f2b status
+sudo f2b sync check
+sudo f2b docker dashboard
+
+4) Optional deep verify
+sudo bash scripts/02-verify-jails-v030.sh
+
+If all checks pass and counts match (11 sets v4, 11 sets v6, 22 INPUT, 6 FORWARD, 11 jails), your system is fully protected with the v0.30 bundle.
+

@@ -1,0 +1,24 @@
+# Fail2Ban Hybrid Manager v0.30
+# Fail2Ban Action: nftables-common.local
+# Date: 2025-12-19
+# Managed by: INSTALL-ALL-v030 bundle
+
+# Fail2Ban nftables custom configuration
+# Overrides default values from nftables.conf
+# CRITICAL: This file ensures correct table naming
+
+[Init]
+# Custom table name (instead of f2b-table)
+# Force single naming scheme across the whole stack:
+# all nftables actions use f2b-<name> sets in inet fail2ban-filter
+addr_set = f2b-<name>
+table = fail2ban-filter
+
+# Custom chain name (instead of f2b-chain)
+chain = f2b-input
+
+# Block type: drop instead of reject
+blocktype = drop
+
+# Address family
+table_family = inet

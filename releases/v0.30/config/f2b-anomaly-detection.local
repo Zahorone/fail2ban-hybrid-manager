@@ -1,0 +1,13 @@
+# Fail2Ban Hybrid Manager v0.30
+# Custom Configuration: f2b-anomaly-detection.local
+# Date: 2025-12-19
+# Managed by: INSTALL-ALL-v030 bundle
+
+# f2b-anomaly-detection.local - False Positive Exceptions
+# Fixes: npm scoped packages with @ symbol
+
+[Definition]
+# Povoľte npm scoped packages (@scope/package) a štandardné assets
+ignoreregex = ^.* GET (?:http|https) [^ ]+ "/assets/vendor/@[a-zA-Z0-9_-]+[a-zA-Z0-9_/-]+/[^"]*" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/assets/(?:js|css|img)/[^"]*\?[A-Za-z0-9_=-]+" \[Client <HOST>\]
+              ^.* GET (?:http|https) [^ ]+ "/[^"]*\?(?:page|id|search|sort|lang|v|ver|version|cache|timestamp|TSJ79)=[^"]*" \[Client <HOST>\]
