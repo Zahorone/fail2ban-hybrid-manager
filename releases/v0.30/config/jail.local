@@ -4,7 +4,6 @@
 # 11 jails, nftables actions, recidive 30d
 
 [DEFAULT]
-[DEFAULT]
 # CUSTOMIZE FOR YOUR SERVER:
 # 1. Set email addresses below
 destemail = admin@example.com

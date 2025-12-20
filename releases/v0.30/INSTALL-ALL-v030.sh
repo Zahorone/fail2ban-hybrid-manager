@@ -214,148 +214,358 @@ echo ""
 
 info "Email Notification & Network Configuration (Optional)"
 echo ""
-echo "Configure email alerts and WAN/Server IP ignore list."
+echo "Configure email alerts and ignore list."
 echo ""
 
-read -p "Do you want to configure email notifications? (yes/no): " -r
+JAIL_LOCAL="$SCRIPTDIR/config/jail.local"
+
+###############################################################################
+# Helper: set/replace key=value only inside the FIRST [DEFAULT] section,
+# and drop duplicate [DEFAULT] headers.
+###############################################################################
+set_default_kv() {
+  local file="$1" key="$2" value="$3"
+
+  awk -v key="$key" -v value="$value" '
+    function is_section(line) { return (line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/) }
+    function is_default(line) { return (line ~ /^[[:space:]]*\[DEFAULT\][[:space:]]*$/) }
+    function is_key(line)     { return (line ~ "^[[:space:]]*" key "[[:space:]]*=") }
+    function emit_kv()        { print key " = " value }
+
+    BEGIN { seen_default=0; in_default=0; key_done=0 }
+
+    {
+      if (is_default($0)) {
+        if (seen_default == 1) next
+        seen_default=1
+        in_default=1
+        print
+        next
+      }
+
+      if (in_default == 1 && is_section($0)) {
+        if (key_done == 0) { emit_kv(); key_done=1 }
+        in_default=0
+        print
+        next
+      }
+
+      if (in_default == 1 && is_key($0)) {
+        if (key_done == 0) { emit_kv(); key_done=1 }
+        next
+      }
+
+      print
+    }
+
+    END {
+      if (seen_default == 0) {
+        print ""
+        print "[DEFAULT]"
+        emit_kv()
+      } else if (in_default == 1 && key_done == 0) {
+        emit_kv()
+      }
+    }
+  ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+}
+
+###############################################################################
+# Helper: read key value from FIRST [DEFAULT]
+###############################################################################
+get_default_value() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    function is_section(line) { return (line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/) }
+    BEGIN { seen_default=0; in_default=0 }
+    /^[[:space:]]*\[DEFAULT\][[:space:]]*$/ {
+      if (seen_default == 1) exit
+      seen_default=1
+      in_default=1
+      next
+    }
+    {
+      if (in_default == 1 && is_section($0)) exit
+      if (in_default == 1 && $0 ~ "^[[:space:]]*" key "[[:space:]]*=") {
+        sub(/^[[:space:]]*[^=]+=[[:space:]]*/, "", $0)
+        print $0
+        exit
+      }
+    }
+  ' "$file"
+}
+
+###############################################################################
+# Helper: merge ignoreip tokens (defaults + existing + new), dedupe, keep order
+###############################################################################
+merge_ignoreip() {
+  local existing="$1" add="$2"
+  local defaults="127.0.0.1/8 ::1"
+
+  echo "$defaults $existing $add" \
+    | tr ',\t\r\n' ' ' \
+    | xargs \
+    | awk '{
+        for (i=1; i<=NF; i++) {
+          if (!seen[$i]++) out = (out ? out FS $i : $i)
+        }
+      }
+      END { print out }'
+}
+
+###############################################################################
+# EMAIL
+###############################################################################
+read -p "Do you want to configure email notifications? (yes/no): " -r EMAIL_REPLY
 echo ""
 
-if [[ $REPLY =~ ^[Yy]es$ ]]; then
-    # Check if mail service is available
-    if command -v mail &>/dev/null || command -v sendmail &>/dev/null; then
-        log "Mail service detected"
+if [[ $EMAIL_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
+  if command -v mail &>/dev/null || command -v sendmail &>/dev/null; then
+    log "Mail service detected"
+    echo ""
+
+    read -p "Enter admin email address (for receiving alerts): " ADMIN_EMAIL
+    read -p "Enter sender email address (for From header): " SENDER_EMAIL
+    echo ""
+
+    if [ -n "$ADMIN_EMAIL" ] && [ -n "$SENDER_EMAIL" ]; then
+      if [ -f "$JAIL_LOCAL" ]; then
+        log "Updating email configuration in jail.local..."
         echo ""
-        
-        read -p "Enter admin email address (for receiving alerts): " ADMIN_EMAIL
-        read -p "Enter sender email address (for From header): " SENDER_EMAIL
-        
-        if [ -n "$ADMIN_EMAIL" ] && [ -n "$SENDER_EMAIL" ]; then
-            # Update jail.local before installation
-            if [ -f "$SCRIPTDIR/config/jail.local" ]; then
-                log "Updating email configuration in jail.local..."
-                
-                # Backup original
-                cp "$SCRIPTDIR/config/jail.local" "$SCRIPTDIR/config/jail.local.backup-$(date +%Y%m%d-%H%M%S)"
-                
-                # Update destemail and sender (global)
-                sed -i "s|^destemail = .*|destemail = $ADMIN_EMAIL|g" "$SCRIPTDIR/config/jail.local"
-                sed -i "s|^sender = .*|sender = $SENDER_EMAIL|g" "$SCRIPTDIR/config/jail.local"
-                
-                log "Email configuration updated:"
-                echo " • Destination email: $ADMIN_EMAIL"
-                echo " • Sender email: $SENDER_EMAIL"
-                echo ""
-                
-                # Show which jails will send emails
-                log "Email alerts will be sent when IPs are banned in:"
-                echo ""
-                grep "action = %(action_mwl)s" "$SCRIPTDIR/config/jail.local" | sed 's/.*\[\(.*\)\].*/   ✉ \1 (on ban: email + ban)/g' | sort -u
-                echo ""
-                
-            else
-                warning "jail.local not found in config/ directory"
-            fi
-        else
-            warning "Invalid email addresses provided, using default configuration"
-        fi
-        
+
+        cp "$JAIL_LOCAL" "$JAIL_LOCAL.backup-$(date +%Y%m%d-%H%M%S)"
+
+        set_default_kv "$JAIL_LOCAL" "destemail" "$ADMIN_EMAIL"
+        set_default_kv "$JAIL_LOCAL" "sender" "$SENDER_EMAIL"
+        # voliteľné:
+        # set_default_kv "$JAIL_LOCAL" "sendername" "Fail2Ban Notifications"
+
+        log "Email configuration updated:"
+        echo " • Destination email: $ADMIN_EMAIL"
+        echo " • Sender email: $SENDER_EMAIL"
         echo ""
+
+        log "Email alerts will be sent when IPs are banned in:"
+        echo ""
+        grep "action = %(action_mwl)s" "$JAIL_LOCAL" \
+          | sed 's/.*\[\(.*\)\].*/   ✉ \1 (on ban: email + ban)/g' \
+          | sort -u
+        echo ""
+      else
+        warning "jail.local not found: $JAIL_LOCAL"
+      fi
     else
-        warning "Mail service not detected on this system"
-        echo " Fail2Ban can still ban IPs, but cannot send email alerts without a mail server."
-        echo " Consider installing postfix or sendmail."
-        echo ""
+      warning "Invalid email addresses provided, using default configuration"
     fi
-else
-    info "Email notifications disabled - using default configuration"
+  else
+    warning "Mail service not detected on this system"
+    echo " Fail2Ban can still ban IPs, but cannot send email alerts without a mail server."
+    echo " Consider installing postfix or sendmail."
     echo ""
-fi
-
-################################################################################
-# AUTO-DETECT WAN/SERVER IP & IGNORE LIST
-################################################################################
-
-info "Auto-Detecting WAN/Server IP Address"
-echo ""
-echo "Adding your server's WAN/LAN IP to the ignore list ensures you won't"
-echo "accidentally block yourself if SSH or web services trigger Fail2Ban."
-echo ""
-
-# Try to detect primary WAN/LAN IP
-WAN_IP=""
-
-# Method 1: Get IP from hostname -I
-if command -v hostname &>/dev/null; then
-    IPS=$(hostname -I 2>/dev/null | awk '{print $1}')
-    if [ -n "$IPS" ]; then
-        WAN_IP="$IPS"
-    fi
-fi
-
-# Method 2: Get from ip addr (if hostname fails)
-if [ -z "$WAN_IP" ] && command -v ip &>/dev/null; then
-    WAN_IP=$(ip addr show | grep "inet " | grep -v "127.0.0.1" | head -1 | awk '{print $2}' | cut -d/ -f1)
-fi
-
-# Method 3: Try ifconfig (fallback for older systems)
-if [ -z "$WAN_IP" ] && command -v ifconfig &>/dev/null; then
-    WAN_IP=$(ifconfig | grep "inet " | grep -v "127.0.0.1" | head -1 | awk '{print $2}')
-fi
-
-if [ -n "$WAN_IP" ]; then
-    log "Detected WAN/Server IP: $WAN_IP"
-    
-    read -p "Add this IP to Fail2Ban ignore list? (yes/no): " -r
-    echo ""
-    
-    if [[ $REPLY =~ ^[Yy]es$ ]]; then
-        # Update ignoreip in jail.local
-        if [ -f "$SCRIPTDIR/config/jail.local" ]; then
-            log "Adding $WAN_IP to ignoreip list in jail.local..."
-            
-            # Check if ignoreip line exists
-            if grep -q "^ignoreip" "$SCRIPTDIR/config/jail.local"; then
-                # Append to existing ignoreip (preserving loopback)
-                sed -i "s|^ignoreip = .*|ignoreip = 127.0.0.1/8 ::1 $WAN_IP|g" "$SCRIPTDIR/config/jail.local"
-            else
-                # Add new ignoreip line after [DEFAULT]
-                sed -i "/\[DEFAULT\]/a ignoreip = 127.0.0.1/8 ::1 $WAN_IP" "$SCRIPTDIR/config/jail.local"
-            fi
-            
-            log "Ignore list updated:"
-            echo " • 127.0.0.1/8 (localhost IPv4)"
-            echo " • ::1 (localhost IPv6)"
-            echo " • $WAN_IP (your server WAN/LAN IP)"
-            echo ""
-        fi
-    else
-        info "WAN IP not added to ignore list"
-        echo ""
-    fi
-else
-    warning "Could not auto-detect server WAN/LAN IP"
-    echo " Manually add your server IP to ignoreip in config/jail.local before installation:"
-    echo " ignoreip = 127.0.0.1/8 ::1 <YOUR_WAN_OR_LAN_IP>"
-    echo ""
-fi
-
-echo ""
-
-
-if [ "$MODE" != "cleanup-only" ]; then
-  read -p "Continue with installation? (yes/no): " -r
-  echo ""
-
-  if [[ ! $REPLY =~ ^[Yy]es$ ]]; then
-    warning "Installation cancelled by user"
-    exit 0
   fi
 else
-  info "Mode: cleanup-only (will run pre-cleanup and exit)"
+  info "Email notifications disabled - using default configuration"
   echo ""
 fi
 
-STARTTIME=$(date +%s)
+###############################################################################
+# IGNOREIP (manual/SSH client + optional Docker subnets)
+###############################################################################
+
+detect_ssh_client_ip() {
+  local ip="" ttydev="" shell_pid="" environ=""
+
+  # 1) Direct env (works when not stripped)
+  if [ -n "${SSH_CLIENT:-}" ]; then
+    ip="$(awk '{print $1}' <<<"$SSH_CLIENT")"
+  elif [ -n "${SSH_CONNECTION:-}" ]; then
+    ip="$(awk '{print $1}' <<<"$SSH_CONNECTION")"
+  fi
+
+  # 2) If running under sudo, try to read SSH_* from the invoking user's shell env
+  if [ -z "$ip" ] && [ -n "${SUDO_USER:-}" ]; then
+    ttydev="$(tty 2>/dev/null | sed 's#^/dev/##')"
+    if [ -n "$ttydev" ]; then
+      shell_pid="$(
+        ps -t "$ttydev" -u "$SUDO_USER" -o pid=,comm= 2>/dev/null \
+          | awk '$2 ~ /^(bash|zsh|fish|sh|dash)$/ {print $1; exit}'
+      )"
+
+      if [ -n "$shell_pid" ] && [ -r "/proc/$shell_pid/environ" ]; then
+        environ="$(tr '\0' '\n' < "/proc/$shell_pid/environ" 2>/dev/null)"
+
+        if echo "$environ" | grep -q '^SSH_CLIENT='; then
+          ip="$(echo "$environ" | sed -n 's/^SSH_CLIENT=//p' | awk '{print $1}' | head -n1)"
+        elif echo "$environ" | grep -q '^SSH_CONNECTION='; then
+          ip="$(echo "$environ" | sed -n 's/^SSH_CONNECTION=//p' | awk '{print $1}' | head -n1)"
+        fi
+      fi
+    fi
+  fi
+
+  # 3) Last resort: who -m (no --ips on your system)
+  if [ -z "$ip" ]; then
+    ip="$(who -m 2>/dev/null | awk '{print $NF}' | tr -d '()')"
+  fi
+
+  # sanitize
+  if [ -z "$ip" ] || [ "$ip" = ":0" ]; then
+    ip=""
+  fi
+
+  echo "$ip"
+}
+
+read -p "Do you want to update Fail2Ban ignoreip whitelist? (yes/no): " -r IGN_REPLY
+echo ""
+
+if [[ $IGN_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
+  if [ ! -f "$JAIL_LOCAL" ]; then
+    warning "jail.local not found: $JAIL_LOCAL"
+  else
+    # --- MAIN FLOW: log exactly once ---
+    CLIENT_IP="$(detect_ssh_client_ip)"
+    if [ -n "$CLIENT_IP" ]; then
+      log "Detected SSH client IP: $CLIENT_IP"
+    else
+      warning "No SSH client IP detected (env + sudo + who failed)"
+    fi
+    echo ""
+    # --- end MAIN FLOW ---
+
+    read -r -p "IP/CIDR(s) to add (comma/space separated; default: ${CLIENT_IP:-none}; empty = skip): " ADD_IP
+    echo ""
+    [ -z "$ADD_IP" ] && ADD_IP="$CLIENT_IP"
+
+    # Docker subnet selection (with safe fallback)
+    read -p "Auto-add Docker subnets to ignoreip? (yes/no): " -r DOCKER_AUTO_REPLY
+    echo ""
+
+    DOCKER_SUBNETS=""
+    if [[ $DOCKER_AUTO_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
+      if ! command -v docker &>/dev/null; then
+        warning "docker command not found; cannot auto-add Docker subnets"
+        echo ""
+      else
+        BRIDGE_NETS="$(docker network ls --filter driver=bridge --format '{{.Name}}' 2>/dev/null | xargs -n1 echo)"
+        if [ -z "$BRIDGE_NETS" ]; then
+          warning "No Docker bridge networks found"
+          echo ""
+        else
+          HAS_GW=0
+          if echo "$BRIDGE_NETS" | grep -qx "docker_gwbridge"; then
+            HAS_GW=1
+          fi
+
+          log "Detected Docker bridge networks:"
+          while read -r net; do
+            [ -z "$net" ] && continue
+            subnets="$(docker network inspect "$net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | xargs)"
+            echo " • $net: ${subnets:-<no subnet>}"
+          done <<<"$BRIDGE_NETS"
+          echo ""
+
+          echo "Select which Docker bridge networks to include:"
+          echo " 1) Only default 'bridge' (safe-check subnet)"
+          if [ "$HAS_GW" -eq 1 ]; then
+            echo " 2) 'bridge' + 'docker_gwbridge' (Swarm gateway bridge)"
+            echo " 3) All bridge networks"
+            echo " 4) Choose by name (comma/space separated)"
+          else
+            echo " 2) All bridge networks"
+            echo " 3) Choose by name (comma/space separated)"
+          fi
+          read -r -p "Choice: " DOCKER_CHOICE
+          echo ""
+
+          SELECTED_NETS=""
+          if [ "$HAS_GW" -eq 1 ]; then
+            case "$DOCKER_CHOICE" in
+              1) SELECTED_NETS="bridge" ;;
+              2) SELECTED_NETS="bridge docker_gwbridge" ;;
+              3) SELECTED_NETS="$BRIDGE_NETS" ;;
+              4)
+                read -r -p "Enter network names: " NET_INPUT
+                SELECTED_NETS="$(echo "$NET_INPUT" | tr ',' ' ' | xargs)"
+                ;;
+              *) warning "Invalid choice, skipping Docker subnets"; echo "" ;;
+            esac
+          else
+            case "$DOCKER_CHOICE" in
+              1) SELECTED_NETS="bridge" ;;
+              2) SELECTED_NETS="$BRIDGE_NETS" ;;
+              3)
+                read -r -p "Enter network names: " NET_INPUT
+                SELECTED_NETS="$(echo "$NET_INPUT" | tr ',' ' ' | xargs)"
+                ;;
+              *) warning "Invalid choice, skipping Docker subnets"; echo "" ;;
+            esac
+          fi
+
+          # Safety check: if only "bridge" chosen, ensure it actually has subnet(s)
+          if [ "$SELECTED_NETS" = "bridge" ]; then
+            BRIDGE_SUBNETS_TEST="$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | xargs)"
+            if [ -z "$BRIDGE_SUBNETS_TEST" ]; then
+              warning "Docker network 'bridge' has no IPAM subnet info; cannot add it safely."
+              echo ""
+
+              read -p "Fallback to ALL Docker bridge networks instead? (yes/no): " -r FALLBACK_REPLY
+              echo ""
+              if [[ $FALLBACK_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
+                SELECTED_NETS="$BRIDGE_NETS"
+              else
+                SELECTED_NETS=""
+                info "Skipping Docker subnet auto-add"
+                echo ""
+              fi
+            fi
+          fi
+
+          if [ -n "$SELECTED_NETS" ]; then
+            DOCKER_SUBNETS="$(
+              for net in $SELECTED_NETS; do
+                docker network inspect "$net" --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null
+              done \
+              | tr ' ' '\n' \
+              | awk 'NF' \
+              | awk '!seen[$0]++' \
+              | tr '\n' ' '
+            )"
+            DOCKER_SUBNETS="$(echo "$DOCKER_SUBNETS" | xargs)"
+
+            if [ -n "$DOCKER_SUBNETS" ]; then
+              log "Docker subnets selected for ignoreip:"
+              echo " $DOCKER_SUBNETS"
+              echo ""
+            else
+              warning "No subnets extracted from selected Docker networks"
+              echo ""
+            fi
+          fi
+        fi
+      fi
+    fi
+
+    if [ -z "$ADD_IP" ] && [ -z "$DOCKER_SUBNETS" ]; then
+      info "Nothing to add; skipping ignoreip update"
+      echo ""
+    else
+      cp "$JAIL_LOCAL" "$JAIL_LOCAL.backup-$(date +%Y%m%d-%H%M%S)"
+
+      EXISTING_IGNOREIP="$(get_default_value "$JAIL_LOCAL" "ignoreip")"
+      NEW_IGNOREIP="$(merge_ignoreip "$EXISTING_IGNOREIP" "$ADD_IP $DOCKER_SUBNETS")"
+
+      set_default_kv "$JAIL_LOCAL" "ignoreip" "$NEW_IGNOREIP"
+
+      log "ignoreip updated to:"
+      echo " $NEW_IGNOREIP"
+      echo ""
+    fi
+  fi
+else
+  info "ignoreip not modified"
+  echo ""
+fi
 
 ################################################################################
 # INSTALLATION STEPS
