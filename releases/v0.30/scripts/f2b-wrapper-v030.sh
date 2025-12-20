@@ -1041,7 +1041,7 @@ manage_block_port() {
         log_warn "Port $port might already be in runtime set"
     fi
 
-    local NFT_DOCKER_CONF="/etc/nftables/docker-block.nft"
+    local NFT_DOCKER_CONF="/etc/nftables.d/docker-block.nft"
 
     if [ ! -f "$NFT_DOCKER_CONF" ]; then
         log_error "Config file not found: $NFT_DOCKER_CONF"
@@ -1094,7 +1094,7 @@ manage_unblock_port() {
         return 1
     fi
 
-    local NFT_DOCKER_CONF="/etc/nftables/docker-block.nft"
+    local NFT_DOCKER_CONF="/etc/nftables.d/docker-block.nft"
 
     if [ ! -f "$NFT_DOCKER_CONF" ]; then
         log_error "Config file not found: $NFT_DOCKER_CONF"
