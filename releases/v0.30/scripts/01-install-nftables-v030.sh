@@ -176,95 +176,37 @@ log_success "FORWARD pravidlá pridané (8/8)"
 echo ""
 
 ################################################################################
-# KROK 6: MIGRÁCIA IP Z FAIL2BAN (ak existujú)
+# KROK 6: MIGRÁCIA IP - SPRÁVNE PARSOVANIE
 ################################################################################
-log_header "═══ KROK 6: MIGRÁCIA IP Z FAIL2BAN ═══"
 
-if ! systemctl is-active --quiet fail2ban 2>/dev/null; then
-    log_warn "Fail2ban nie je aktívny - preskakujem migráciu (čistá inštalácia)"
-    echo ""
-else
-    ACTIVE_JAILS=$(sudo fail2ban-client status 2>/dev/null | grep "Jail list:" | sed 's/.*://' | tr ',' '\n' | grep -cv '^ *$' || echo 0)
-    
-    if [ "$ACTIVE_JAILS" -eq 0 ]; then
-        log_warn "Žiadne aktívne jaily - preskakujem migráciu (čistá inštalácia)"
-        log_info "Toto je OK pre prvú inštaláciu"
-        echo ""
-    else
-        log_info "Detekovaný $ACTIVE_JAILS aktívnych jailov, pokúsim sa migrovať IP..."
-        echo ""
-        
-        # Mapping jail -> nftables set
-        declare -A JAILS
-        JAILS=(
-            ["sshd"]="f2b-sshd"
-            ["sshd-slowattack"]="f2b-sshd-slowattack"
-            ["f2b-exploit-critical"]="f2b-exploit-critical"
-            ["f2b-dos-high"]="f2b-dos-high"
-            ["f2b-web-medium"]="f2b-web-medium"
-            ["nginx-recon-bonus"]="f2b-nginx-recon-bonus"
-            ["recidive"]="f2b-recidive"
-            ["manualblock"]="f2b-manualblock"
-            ["f2b-fuzzing-payloads"]="f2b-fuzzing-payloads"
-            ["f2b-botnet-signatures"]="f2b-botnet-signatures"
-            ["f2b-anomaly-detection"]="f2b-anomaly-detection"
-        )
-        
-        MIGRATED_COUNT=0
-        
-        for entry in "${!JAILS[@]}"; do
-            jail="$entry"
-            set="${JAILS[$entry]}"
-            
-            if ! sudo fail2ban-client status "$jail" &>/dev/null; then
-                continue
-            fi
-            
-            IPS=$(sudo fail2ban-client get "$jail" banned 2>/dev/null || \
-                  sudo fail2ban-client status "$jail" 2>/dev/null | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')
-            
-            if [ -z "$IPS" ]; then
-                continue
-            fi
-            
-            COUNT=$(echo "$IPS" | grep -c '' 2>/dev/null || echo 0)
-            
-            if [ "$COUNT" -gt 0 ]; then
-                # Conditional timeout pre migráciu
-                if [ "$jail" = "recidive" ]; then
-                    TIMEOUT="2592000s"  # 30 days
-                else
-                    TIMEOUT="604800s"   # 7 days
-                fi
-                
-                log_info "$jail -> $set ($COUNT IP, timeout: $TIMEOUT)"
-                
-                while IFS= read -r ip; do
-                    if [ -n "$ip" ]; then
-                        echo -n "    $ip ... "
-                        if echo "$ip" | grep -q ":"; then
-                            # IPv6
-                            sudo nft add element inet fail2ban-filter "$set-v6" "{ $ip timeout $TIMEOUT }" 2>/dev/null && echo "✓ v6" || echo ""
-                        else
-                            # IPv4
-                            sudo nft add element inet fail2ban-filter "$set" "{ $ip timeout $TIMEOUT }" 2>/dev/null && echo "✓ v4" || echo ""
-                        fi
-                        ((MIGRATED_COUNT++))
-                    fi
-                done <<< "$IPS"
-            fi
-        done
-        
-        echo ""
-        if [ "$MIGRATED_COUNT" -gt 0 ]; then
-            log_success "Migrovalo sa $MIGRATED_COUNT IP adries"
-        else
-            log_info "Žiadne IP na migráciu (čisté jaily)"
-        fi
-    fi
-fi
+# Test parsovanie:
+echo "=== TEST: Get banip ==="
+sudo fail2ban-client get sshd-slowattack banip
+
 echo ""
+echo "=== TEST: Parse IP (SPRÁVNE) ==="
+BANNED_IPS=$(sudo fail2ban-client get sshd-slowattack banip 2>/dev/null | \
+    tr ' ' '\n' | \
+    grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | \
+    sort -u)
 
+echo "Parsed IPs:"
+echo "$BANNED_IPS"
+echo "Count: $(echo "$BANNED_IPS" | wc -l)"
+
+echo ""
+echo "=== Migrácia ==="
+while IFS= read -r ip; do
+    if [ -z "$ip" ]; then
+        continue
+    fi
+    echo "Adding: $ip"
+    sudo nft add element inet fail2ban-filter f2b-sshd-slowattack "{ $ip }" && echo "✓" || echo "✗"
+done <<< "$BANNED_IPS"
+
+echo ""
+echo "=== Výsledok ==="
+sudo nft list set inet fail2ban-filter f2b-sshd-slowattack
 ################################################################################
 # KROK 7: REŠTART FAIL2BAN
 ################################################################################
