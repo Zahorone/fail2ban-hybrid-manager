@@ -9,7 +9,7 @@
 # - nftables
 # - jq (JSON processor) - install: sudo apt install jq
 
-# v0.30 CHANGES (2025-12-20):
+# v0.31 CHANGES (2025-12-20):
 # + FIXED: f2b_sync_docker() - Union approach for all F2B sets
 # + FIXED: f2b_sync_docker() - nft get element with { IP } syntax
 # + FIXED: f2b_sync_docker() - Accurate IPv4/IPv6 sync (FIX v0.30)
@@ -34,7 +34,7 @@
 set -o pipefail
 
 # shellcheck disable=SC2034
-RELEASE="v0.30"
+RELEASE="v0.31"
 
 # shellcheck disable=SC2034
 VERSION="0.31"
@@ -520,6 +520,56 @@ sync_silent() {
   else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sync completed - $CHANGES changes" >> "$LOG_FILE"
   fi
+}
+
+f2b_sync_enhanced() {
+  log_header "F2B SYNC ENHANCED (Bidirectional)"
+  local removed=0 added=0
+  log_header "Phase 1: Remove orphaned IPs"
+  for jail in "${JAILS[@]}"; do
+    local nftset="${SETMAP[$jail]}"
+    local f2b_ips nft_ips f2b_count nft_count
+    f2b_ips=$(get_f2b_ips "$jail")
+    nft_ips=$(get_nft_ips "$nftset")
+    f2b_count=$(count_ips "$f2b_ips")
+    nft_count=$(count_ips "$nft_ips")
+    log_info "[$jail] F2B=$f2b_count, NFT=$nft_count"
+    if [ -z "$f2b_ips" ]; then
+      while read -r ip; do
+        [ -n "$ip" ] && sudo nft delete element "$F2BTABLE" "$nftset" "{ $ip }" 2>/dev/null && ((removed++))
+      done <<< "$nft_ips"
+    else
+      while read -r ip; do
+        [ -n "$ip" ] && ! echo "$f2b_ips" | grep -q "$ip" && sudo nft delete element "$F2BTABLE" "$nftset" "{ $ip }" 2>/dev/null && ((removed++))
+      done <<< "$nft_ips"
+    fi
+  done
+  echo ""
+  log_header "Phase 2: Add missing IPs"
+  for jail in "${JAILS[@]}"; do
+    local nftset="${SETMAP[$jail]}"
+    local f2b_ips nft_ips
+    f2b_ips=$(get_f2b_ips "$jail")
+    nft_ips=$(get_nft_ips "$nftset")
+    while read -r ip; do
+      [ -n "$ip" ] && ! echo "$nft_ips" | grep -q "$ip" && sudo nft add element "$F2BTABLE" "$nftset" "{ $ip }" 2>/dev/null && ((added++))
+    done <<< "$f2b_ips"
+  done
+  echo ""
+  log_header "SYNC REPORT"
+  log_success "Removed orphaned: $removed"
+  log_success "Added missing: $added"
+  if [ "$removed" -gt 0 ] || [ "$added" -gt 0 ]; then
+    log_success "✅ Synchronization completed!"
+  else
+    log_warn "No changes needed"
+  fi
+  echo ""
+}
+
+f2b_sync_force() {
+  f2b_sync_enhanced
+  f2b_sync_check
 }
 
 ################################################################################
