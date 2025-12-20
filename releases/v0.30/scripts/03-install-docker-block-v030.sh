@@ -16,26 +16,21 @@ BUILD_DATE="2025-12-19"
 # shellcheck disable=SC2034
 COMPONENT_NAME="INSTALL-DOCKER-BLOCK"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_header()  { echo -e "${BLUE}$1${NC}"; }
-log_success() { echo -e "${GREEN}✓${NC} $1"; }
-log_error()   { echo -e "${RED}✗${NC} $1"; }
-log_info()    { echo -e "${BLUE}ℹ${NC} $1"; }
-log_warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
+log() { echo -e "${GREEN}[✓]${NC} $1"; }
+error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+info() { echo -e "${BLUE}[ℹ]${NC} $1"; }
 
 echo ""
-echo "╔════════════════════════════════════════════════════════════╗"
-echo "║                                                            ║"
-echo "║   Docker Port Blocking Installer ${RELEASE} (v0.4 rules)  ║"
-echo "║   docker-block table + DOCKER-USER integration             ║"
-echo "║                                                            ║"
-echo "╚════════════════════════════════════════════════════════════╝"
+echo "══════════════════════════════════════════════════════════"
+echo " Docker Port + IP Blocking Setup v0.4 (v0.30 FIXED)"
+echo "══════════════════════════════════════════════════════════"
 echo ""
 
 # Check if running as root
@@ -306,3 +301,4 @@ echo "Test reload:"
 echo " sudo nft -f /etc/nftables.conf"
 
 echo ""
+
