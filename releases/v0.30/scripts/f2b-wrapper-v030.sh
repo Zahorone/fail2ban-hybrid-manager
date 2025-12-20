@@ -34,10 +34,10 @@
 set -o pipefail
 
 # shellcheck disable=SC2034
-RELEASE="v0.31"
+RELEASE="v0.30"
 
 # shellcheck disable=SC2034
-VERSION="0.31"
+VERSION="0.30"
 
 # shellcheck disable=SC2034
 BUILD_DATE="2025-12-20"
