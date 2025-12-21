@@ -1,22 +1,25 @@
-# Fail2Ban + nftables v0.22 - Production Setup
+# Fail2Ban + nftables v0.30 - Production Bundle
 
-Complete Fail2Ban + nftables integration with **full IPv4 + IPv6 dual-stack support**, 11 advanced detection filters, Docker port blocking, and comprehensive management wrapper.
+Complete Fail2Ban + nftables integration with **one-click installer**, full IPv4 + IPv6 dual-stack support, 11 advanced detection filters, Docker port blocking v0.4, and comprehensive management wrapper with enhanced reporting.
 
 ## 🎯 Features
 
 ### Core Infrastructure
 - **Full IPv4 + IPv6 Support** - 22 nftables sets (11 IPv4 + 11 IPv6)
-- **11 Fail2Ban Jails** - Multi-layered security (added f2b-anomaly-detection)
+- **11 Fail2Ban Jails** - Multi-layered security
 - **11 Detection Filters** - Advanced threat detection
-- **3 Configuration Files** - jail.local + 2 filter extensions
+- **30d Recidive Jail** - Long-term repeat offender blocking
+- **Safe Pre-Cleanup** - Backup + legacy cleanup before install
 
 ### Advanced Tools
-- **Docker Port + IP Blocking v0.4** – blokovanie portov a IP adries ešte pred Docker NAT
-- **Docker Auto-Sync (f2b sync docker)** – prenáša Fail2Ban bans do `docker-block` tabuliek
-- **Docker Dashboard (v0.23)** – živý prehľad docker-block stavu
-- **F2B Wrapper v0.23** - 43 management functions
+- **One-Click Installer** - `INSTALL-ALL-v030.sh` (auto-detects upgrade paths)
+- **Docker Port + IP Blocking v0.4** - Blocks before Docker NAT (PREROUTING)
+- **Docker Auto-Sync** - Every minute sync via cron
+- **Docker Dashboard** - Real-time docker-block monitoring
+- **F2B Wrapper v0.30** - 50+ management functions with attack analysis
 - **Auto-Sync Service** - Hourly fail2ban ↔ nftables sync
-- **Bash Aliases** - Quick access shortcuts
+- **Minimal Bash Aliases** - Optional quick access shortcuts
+- **ShellCheck Clean** - All scripts pass syntax + style checks
 
 ### Security Layers
 
@@ -29,66 +32,76 @@ Complete Fail2Ban + nftables integration with **full IPv4 + IPv6 dual-stack supp
 6. **nginx-recon-bonus** - Nginx reconnaissance
 7. **f2b-fuzzing-payloads** - Fuzzing detection
 8. **f2b-botnet-signatures** - Botnet signatures
-9. **f2b-anomaly-detection** - Anomaly patterns **[NEW in v0.22]**
+9. **f2b-anomaly-detection** - Anomaly patterns
 10. **manualblock** - Manual IP banning
-11. **recidive** - Repeat offenders
-
+11. **recidive** - Repeat offenders (30d ban)
 
 #### 11 Detection Filters:
 Each jail has a corresponding optimized filter in `filters/` directory.
 
 ## 🐋 Docker Protection
+
 Docker containers are protected the same way as the host – all Fail2Ban bans are automatically propagated to the docker-block table (PREROUTING), so attackers are dropped before they ever reach Docker services.
+
 Key features:
 - Automatic sync of banned IPs from Fail2Ban jails to `docker-banned-ipv4`/`docker-banned-ipv6`
 - Port-level blocking via `docker-blocked-ports` (services exposed from Docker)
 - PREROUTING hook ensures packets are dropped before Docker NAT
+- Every-minute cron sync (`07-setup-docker-sync-cron-v030.sh`)
 
 ### Docker-block nftables (v0.4)
-- `03-install-docker-block-v04.sh` vytvorí `table inet docker-block` s:
-  - `docker-blocked-ports` – porty Docker služieb, ktoré majú byť zvonku blokované
-  - `docker-banned-ipv4` / `docker-banned-ipv6` – IP adresy, ktoré sa zahodia v PREROUTING
-- Pravidlá bežia v `hook prerouting priority dstnat`, takže IP sú dropnuté ešte pred Docker NAT.
 
-### Wrapper príkazy (v0.22/v0.23)
-Porty
+`03-install-docker-block-v030.sh` creates `table inet docker-block` with:
+- `docker-blocked-ports` - Docker service ports to block externally
+- `docker-banned-ipv4` / `docker-banned-ipv6` - IPs dropped in PREROUTING
+- Rules run in `hook prerouting priority dstnat` (before Docker NAT)
+
+### Wrapper Commands (v0.30)
+
+**Ports:**
+
 ```bash
 sudo f2b manage block-port 8081
 sudo f2b manage unblock-port 8081
 sudo f2b manage list-blocked-ports
 ```
 
-### Manage - Advanced IP Control
+**Manual IP bans (manual quarantine, goes to f2b-manualblock → then docker-block):**
 
-Manuálne IP (manuálna karanténa, ide do f2b-manualblock → následne aj docker-block)
 ```bash
 sudo f2b manage manual-ban 198.51.100.10 7d
 sudo f2b manage manual-unban 198.51.100.10
 ```
 
-Unban IP from all jails + nftables
+**Unban IP from all jails + nftables:**
+
 ```bash
 sudo f2b manage unban-all 198.51.100.10
 ```
 
 ### Sync & Docker Integration
 
-Enhanced bidirectional sync (Fail2Ban ↔ nftables)
+**Enhanced bidirectional sync (Fail2Ban ↔ nftables):**
+
 ```bash
 sudo f2b sync enhanced
 sudo f2b sync force
 ```
-Silent sync for cron (logs only changes to /var/log/f2b-sync.log)
+
+**Silent sync for cron (logs only changes to /var/log/f2b-sync.log):**
+
 ```bash
 sudo f2b sync silent
 ```
 
-Docker sync: propagate bans to docker-block (docker-banned-ipv4/v6)
+**Docker sync: propagate bans to docker-block (docker-banned-ipv4/v6):**
+
 ```bash
 sudo f2b sync docker
 ```
 
-Docker visibility & monitoring (v0.23)
+**Docker visibility & monitoring:**
+
 ```bash
 sudo f2b docker info
 sudo f2b docker dashboard
@@ -96,101 +109,131 @@ sudo f2b docker dashboard
 
 ### Auto-sync fail2ban → docker-block
 
-- `07-setup-docker-sync-cron.sh`:
-  - vytvorí cron job: `*/1 * * * * /usr/local/bin/f2b sync docker >> /var/log/f2b-docker-sync.log 2>&1`
-  - inicializuje prvý sync a nastaví logrotate pre `/var/log/f2b-docker-sync.log`.
-- Wrapper (v0.23) má:
-  - `f2b sync docker` – bidirekčný sync jaily ↔ docker-banned-ipv4
-  - `f2b docker info` – stav docker-block tabuľky
-  - `f2b docker dashboard` – real-time dashboard (tail + štatistiky)
+- `07-setup-docker-sync-cron-v030.sh`:
+  - Creates cron job: `*/1 * * * * /usr/local/bin/f2b sync docker >> /var/log/f2b-docker-sync.log 2>&1`
+  - Initializes first sync and sets up logrotate for `/var/log/f2b-docker-sync.log`
+
+- Wrapper (v0.30) has:
+  - `f2b sync docker` - Bidirectional sync jails ↔ docker-banned-ipv4
+  - `f2b docker info` - docker-block table status
+  - `f2b docker dashboard` - Real-time dashboard (tail + stats)
 
 ## 🚀 Quick Start
 
 ### One-Command Installation
 
 ```bash
-# Download and extract
-tar -xzf fail2ban-nftables-v022-production.tar.gz
-cd fail2ban-nftables
-
-# Run universal installer
-chmod +x INSTALL-ALL-v022.sh
-sudo bash INSTALL-ALL-v022.sh
+tar -xzf f2b-hybrid-nftables-v030.tar.gz
+cd v030
+sudo bash INSTALL-ALL-v030.sh
 ```
 
 The installer auto-detects:
-- Fresh installation
-- Upgrade from v0.20 (adds IPv6) or v0.20
-- Reinstall v0.21
+- Fresh installation (new server)
+- Upgrade from v0.19–v0.24 (preserves bans, adds/rebuilds structure)
+- Reinstall v0.30 (clean rebuild with ban preservation)
+
+### Interactive Configuration (First Run)
+
+The installer guides you through setup interactively:
+
+1. **Email Notifications** (optional)
+   - Detects mail service (postfix, sendmail)
+   - Prompts for admin email + sender email
+   - Updates all jails with email alerts on ban
+   - Shows which jails send email notifications
+
+2. **WAN/Server IP Detection** (auto)
+   - Auto-detects your server's WAN or LAN IP
+   - Adds it to Fail2Ban ignore list (prevents self-blocking)
+   - Preserves 127.0.0.1/8 and ::1 loopback addresses
+
+3. **Proceed to Installation**
+   - After configuration, installer continues with nftables, jails, wrapper, docker-block
+
+### Safe Test Mode (Recommended for Production First Run)
+
+```bash
+sudo bash INSTALL-ALL-v030.sh --cleanup-only
+```
+
+This runs `00-pre-cleanup-v030.sh` with backup + legacy cleanup, then exits before touching nftables/jails.
 
 ### Verification
 
 ```bash
-# Check system status
 sudo f2b status
-
-# Verify nftables rules
 sudo nft list chain inet fail2ban-filter f2b-input | grep -c drop
-# Expected: 22 (was 20 in v0.21)
-
-# Audit all jails
+# Expected: 22 (11 IPv4 + 11 IPv6)
 sudo f2b audit
+sudo bash scripts/02-verify-jails-v030.sh
 ```
 
 ## 📁 Repository Structure
 
 ```
-v0.22/
-├── INSTALL-ALL-v022.sh              # Universal installer
+v030/
+├── INSTALL-ALL-v030.sh
 ├── scripts/
-│   ├── 00-pre-cleanup-v021.sh
-│   ├── 01-install-nftables-v022.sh  # [UPDATED] Clean install support
-│   ├── 02-install-jails-v022.sh     # [UPDATED] Path resolution fix
-│   ├── 02-verify-jails-v022.sh      # [UPDATED] 11 jails check
-│   ├── 03-install-docker-block-v04.sh
-│   ├── 04-install-wrapper-v023.sh
-│   ├── 05-install-auto-sync.sh
-│   ├── 06-install-aliases-v023.sh
-│   ├── f2b-wrapper-v023.sh          # Main wrapper
-│   └── 07-setup-docker-sync-cron.sh
+│   ├── 00-pre-cleanup-v030.sh
+│   ├── 01-install-nftables-v030.sh
+│   ├── 02-install-jails-v030.sh
+│   ├── 02-verify-jails-v030.sh
+│   ├── 03-install-docker-block-v030.sh
+│   ├── 04-install-wrapper-v030.sh
+│   ├── 05-install-auto-sync-v030.sh
+│   ├── 06-install-aliases-v030.sh
+│   ├── 07-setup-docker-sync-cron-v030.sh
+│   └── f2b-wrapper-v030.sh
 ├── config/
-│   ├── jail.local                   # 11 jails configuration
-│   ├── nginx-recon-optimized.local  # Filter extension (→ filter.d)
-│   └── f2b-anomaly-detection.local  # Filter extension (→ filter.d) [NEW]
-├── filters/                         # 11 detection filters
+│   ├── jail.local
+│   ├── nginx-recon-optimized.local
+│   └── f2b-anomaly-detection.local
+├── filters/
 │   ├── sshd.conf
 │   ├── f2b-exploit-critical.conf
 │   ├── f2b-dos-high.conf
 │   ├── f2b-web-medium.conf
 │   ├── f2b-fuzzing-payloads.conf
 │   ├── f2b-botnet-signatures.conf
-│   ├── f2b-anomaly-detection.conf   # [NEW in v0.22]
+│   ├── f2b-anomaly-detection.conf
 │   ├── nginx-recon-optimized.conf
 │   ├── manualblock.conf
 │   └── recidive.conf
+├── action.d/
+│   ├── nftables-common.local
+│   ├── nftables-multiport.conf
+│   └── nftables-recidive.conf
 └── docs/
-    ├── README.md
-    ├── CHANGELOG.md
-    └── PACKAGE-INFO.txt
+    ├── README-v030.md
+    ├── CHANGELOG-v030.md
+    ├── MIGRATION-GUIDE.md
+    └── PACKAGE-INFO-v030.txt
 ```
 
 ## 🔧 F2B Wrapper Commands
 
 ### Core
+
 ```bash
 sudo f2b status          # System overview
 sudo f2b audit           # Audit all jails
 sudo f2b find <IP>       # Find IP in jails
-sudo f2b version         # Version info
+sudo f2b version         # Version info (--human, --json, --short)
 ```
 
 ### Sync
+
 ```bash
 sudo f2b sync check      # Verify sync
+sudo f2b sync enhanced   # Enhanced checks
 sudo f2b sync force      # Force sync + verify
+sudo f2b sync silent     # Silent (cron-friendly)
+sudo f2b sync docker     # Sync to docker-block
 ```
 
 ### Manage - Ports
+
 ```bash
 sudo f2b manage block-port 8081
 sudo f2b manage unblock-port 8081
@@ -198,223 +241,212 @@ sudo f2b manage list-blocked-ports
 ```
 
 ### Manage - IPs
+
 ```bash
 sudo f2b manage manual-ban 192.0.2.1 30d
 sudo f2b manage manual-unban 192.0.2.1
+sudo f2b manage unban-all 192.0.2.1
+```
+
+### Manage - System
+
+```bash
+sudo f2b manage reload   # Reload fail2ban
+sudo f2b manage backup   # Backup configs
 ```
 
 ### Monitor
+
 ```bash
-sudo f2b monitor watch           # Real-time
+sudo f2b monitor watch           # Real-time dashboard
 sudo f2b monitor trends          # Attack trends
 sudo f2b monitor top-attackers   # Top 10
-sudo f2b monitor jail-log sshd 50
+sudo f2b monitor show-bans       # Show banned IPs
+sudo f2b monitor jail-log sshd 50 # Jail log (last 50 lines)
 ```
 
-### Reports
+### Reports & Analysis (NEW in v0.30)
+
 ```bash
 sudo f2b report json > report.json
 sudo f2b report csv > report.csv
 sudo f2b report daily
+sudo f2b report timeline
+sudo f2b report attack-analysis
+sudo f2b report attack-analysis --npm-only
+sudo f2b report attack-analysis --ssh-only
 ```
 
-## 🆕 What's New in v0.22
+### Docker
 
-### Critical Fixes
-- ✅ **Clean Install Support** - No more errors on fresh servers without fail2ban
-- ✅ **Path Resolution Fix** - Scripts correctly find config/ and filters/ from scripts/ directory
-- ✅ **Filter Extension Logic** - *.local files now properly go to filter.d (not jail.d)
+```bash
+sudo f2b docker dashboard
+sudo f2b docker info
+sudo f2b docker sync
+```
 
-### New Features
-- ✅ **11th Jail Added** - `f2b-anomaly-detection` for anomaly pattern detection
-- ✅ **Enhanced Verification** - `02-verify-jails-v022.sh` checks all 11 jails
-- ✅ **Idempotent Installation** - Automatic backup before overwriting filters
-- ✅ `f2b manage unban-all <IP>` – removes an IP from all jails and syncs nftables
-- ✅ Manual quarantine via `f2b manage manual-ban` / `manual-unban` (uses `f2b-manualblock` set)
-- ✅ Enhanced sync reporting with `f2b sync enhanced` / `sync force` and `sync silent` for cron
-- ✅ Full Docker integration:
-  - `f2b sync docker` feeds all banned IPs into `docker-banned-ipv4/v6`
-  - `f2b docker info` and `f2b docker dashboard` show docker-block status in real time
+### Silent / Cron
 
+```bash
+sudo f2b audit-silent
+```
 
-### Infrastructure
-- ✅ 22 nftables sets (11 IPv4 + 11 IPv6) - was 20
-- ✅ 22 INPUT rules (11 + 11) - was 20
-- ✅ 6 FORWARD rules (3 + 3) - unchanged
+## 🆕 What's New in v0.30
 
-### Scripts Enhanced
-- `01-install-nftables-v022.sh` - Conditional fail2ban operations
-- `02-install-jails-v022.sh` - Proper parent directory resolution
-- `02-verify-jails-v022.sh` - Checks all 11 jails including new ones
+### One-Click Production Installer
+- **INSTALL-ALL-v030.sh** - Orchestrates full install/upgrade
+- Auto-detects: fresh / upgrade from v0.19–v0.24 / reinstall v0.30
+- Safe pre-cleanup with `--cleanup-only` mode
+- Preserves existing bans and structure during upgrade
+
+### Enhanced Wrapper v0.30
+- **Attack Analysis Reporting**
+  - `f2b report attack-analysis` (NPM + SSH combined)
+  - `--npm-only` / `--ssh-only` modes
+  - `f2b report timeline` for hourly attack trends
+- **Improved Sync & Monitoring**
+  - Enhanced docker dashboard
+  - Better jq helpers for JSON parsing
+  - Safer lock handling
+- **ShellCheck Clean**
+  - Fixed SC2034/SC2086/SC2126/SC2155/SC2188/SC1083
+  - Unified metadata header across all scripts
+
+### Safe Pre-Cleanup (NEW)
+- **00-pre-cleanup-v030.sh**
+  - Full backup of nftables + fail2ban configs
+  - Safe cleanup of legacy systemd units, cron entries, aliases
+  - FORCE mode for full reinstall
+  - Verification snapshot at the end
+
+### Minimal Aliases (Optional)
+- **06-install-aliases-v030.sh**
+  - Minimal set: f2b-status, f2b-audit, f2b-watch, f2b-trends
+  - f2b-sync, f2b-sync-enhanced, f2b-sync-docker
+  - f2b-docker-dashboard, f2b-attack-analysis, f2b-audit-silent
+  - Idempotent update of `~/.bashrc` with backup
+
+### Infrastructure (Unchanged from v0.24)
+- 22 nftables sets (11 IPv4 + 11 IPv6)
+- 22 INPUT rules (11 + 11)
+- 6 FORWARD rules (3 + 3)
+- 11 jails with correct banaction mapping
+- 30d recidive jail (nftables-recidive.conf)
 
 ## 🎓 Advanced Usage
 
 ### Manual Configuration (Production Best Practice)
 
-By default, email notification addresses (`destemail`, `sender`) and `ignoreip` are set to generic values.  
-For production, update them in `config/jail.local` before running the installer.
-
-For production servers with custom requirements:
-
-1. **Edit Configuration**
 ```bash
-cd fail2ban-nftables
-nano config/jail.local           # Customize emails, ports, logpaths
-nano filters/*.conf              # Adjust detection patterns
+cd v030
+nano config/jail.local
+nano filters/*.conf
+sudo bash INSTALL-ALL-v030.sh
+sudo bash scripts/02-verify-jails-v030.sh
 ```
 
-2. **Manual Installation**
-```bash
-# Copy configurations
-sudo cp config/jail.local /etc/fail2ban/
-sudo cp config/nginx-recon-optimized.local /etc/fail2ban/filter.d/
-sudo cp config/f2b-anomaly-detection.local /etc/fail2ban/filter.d/
+### Upgrade from v0.19–v0.24
 
-# Copy all filters
-sudo cp filters/*.conf /etc/fail2ban/filter.d/
-
-# Restart Fail2Ban
-sudo systemctl restart fail2ban
-```
-
-3. **Verify Configuration**
-```bash
-sudo bash scripts/02-verify-jails-v021.sh
-```
-
-This diagnostic script checks:
-- Banaction configuration
-- nftables integration
-- Active jails vs configured jails
-- Configuration consistency
-
-### Upgrade from v0.20
-
-The installer automatically detects v0.20 and upgrades to v0.21:
-
-**Changes:**
-- Adds 10 IPv6 sets
-- Adds 10 IPv6 INPUT rules
-- Adds 3 IPv6 FORWARD rules
-- Updates wrapper to v0.21
-- Preserves all existing bans
+The installer automatically detects previous versions and handles upgrade.
 
 **Verification:**
+
 ```bash
 sudo nft list table inet fail2ban-filter | grep "set f2b-.*-v6" | wc -l
-# Should return: 10
+# Should return: 11
+
+sudo f2b version --short
+# Should return: 0.30
 ```
 
-## 📊 What's New in v0.20
+## 📊 Minimal Aliases (Optional)
 
-### Infrastructure
-- ✅ Full IPv4 + IPv6 dual-stack support
-- ✅ 20 nftables sets (10 IPv4 + 10 IPv6)
-- ✅ 20 INPUT rules (10 + 10)
-- ✅ 6 FORWARD rules (3 + 3)
+After running `06-install-aliases-v030.sh`:
 
-### Jails & Filters
-- ✅ 10 Fail2Ban jails
-- ✅ 10 advanced detection filters
-- ✅ 2 configuration files
+```bash
+f2b-status           # sudo f2b status
+f2b-audit            # sudo f2b audit
+f2b-watch            # sudo f2b monitor watch
+f2b-trends           # sudo f2b monitor trends
+f2b-sync             # sudo f2b sync check
+f2b-sync-enhanced    # sudo f2b sync enhanced
+f2b-sync-docker      # sudo f2b sync docker
+f2b-docker-dashboard # sudo f2b docker dashboard
+f2b-attack-analysis  # sudo f2b report attack-analysis
+f2b-audit-silent     # sudo f2b audit-silent
+```
 
-### Tools
-- ✅ F2B Wrapper v0.21 - 43 functions
-- ✅ Universal installer (auto-detect upgrade)
-- ✅ Separate verifier tool (diagnostic)
-- ✅ Docker blocking v0.3
-- ✅ Auto-sync service
-- ✅ Bash aliases
-
-### Scripts
-- ✅ `02-install-jails-v021.sh` - Full installer (copies filters)
-- ✅ `02-verify-jails-v021.sh` - Verification tool (diagnostic)
+Activate with: `source ~/.bashrc`
 
 ## 📦 Installation Scenarios
 
-### Scenario 1: Fresh Server
-```bash
-sudo bash INSTALL-ALL-v021.sh
-```
-Installs everything from scratch.
+### Fresh Server (Clean Install)
 
-### Scenario 2: Upgrade from v0.21
 ```bash
-sudo bash INSTALL-ALL-v021.sh
+sudo bash INSTALL-ALL-v030.sh
 ```
-Auto-detects v0.19, adds IPv6 support.
 
-### Scenario 3: Production with Custom Config
+### Upgrade from v0.22/v0.24
+
 ```bash
-# Edit configs
+sudo bash INSTALL-ALL-v030.sh
+```
+
+### Production Test (--cleanup-only)
+
+```bash
+sudo bash INSTALL-ALL-v030.sh --cleanup-only
+```
+
+### Multi-Server Deployment
+
+```bash
 nano config/jail.local
-
-# Manual copy
-sudo cp config/jail.local /etc/fail2ban/
-sudo cp filters/*.conf /etc/fail2ban/filter.d/
-
-# Verify
-sudo bash scripts/02-verify-jails-v021.sh
-```
-
-### Scenario 4: Multi-Server Deployment
-```bash
-# Server 1
-sed -i 's|/var/log/nginx/access.log|/var/log/web/access.log|' config/jail.local
-sudo cp config/jail.local /etc/fail2ban/
-sudo bash scripts/02-verify-jails-v020.sh
-
-# Server 2
-sed -i 's|destemail = root@localhost|destemail = admin@company.com|' config/jail.local
-sudo cp config/jail.local /etc/fail2ban/
-sudo bash scripts/02-verify-jails-v020.sh
+sudo bash INSTALL-ALL-v030.sh
 ```
 
 ## 🛠️ Troubleshooting
 
-### Issue: Scripts can't find config/ or filters/
-```bash
-Make sure you run from main directory
-cd v0.22/
-sudo bash INSTALL-ALL-v022.sh
+### Scripts can't find config/ or filters/
 
-Not from scripts/ directory
-cd v0.22/scripts/ # ❌ Wrong
-sudo bash INSTALL-ALL-v022.sh
+```bash
+cd v030/
+sudo bash INSTALL-ALL-v030.sh
+# Not from scripts/ directory ❌
 ```
 
-### Issue: Jail not starting
+### Jail not starting
+
 ```bash
-# Check logs
 sudo tail -f /var/log/fail2ban.log
-
-# Verify filter syntax
 sudo fail2ban-regex /path/to/logfile /etc/fail2ban/filter.d/filtername.conf
-
-# Run diagnostic
-sudo bash scripts/02-verify-jails-v020.sh
+sudo bash scripts/02-verify-jails-v030.sh
 ```
 
-### Issue: nftables rules missing
+### nftables rules missing
+
 ```bash
-# Verify table exists
 sudo nft list table inet fail2ban-filter
-
-# Count rules
 sudo nft list chain inet fail2ban-filter f2b-input | grep -c drop
-# Should be: 20
-
-# Reinstall
-sudo bash scripts/01-install-nftables-v020.sh
+# Should be: 22
+sudo bash scripts/01-install-nftables-v030.sh
 ```
 
-### Issue: Sync problems
-```bash
-# Check sync status
-sudo f2b sync check
+### Sync problems
 
-# Force sync
+```bash
+sudo f2b sync check
 sudo f2b sync force
+sudo f2b sync enhanced
+```
+
+### Docker-block not working
+
+```bash
+sudo nft list table inet docker-block
+sudo f2b sync docker
+crontab -l | grep f2b
+sudo f2b docker dashboard
 ```
 
 ## 📜 License
@@ -423,16 +455,14 @@ MIT License - See LICENSE file
 
 ## 👤 Author
 
-Peter Bakič  
-vibes coder · self-hosted infra & security  
-Powered by Claude Sonnet 4.5 thinking
+Peter Bakič - vibes coder · self-hosted infra & security
 
 ## 📞 Support
 
 - Email: zahor@tuta.io
 - GitHub Issues: Report bugs or feature requests
 - Documentation: See `docs/` directory
-- Verification Tool: `sudo bash scripts/02-verify-jails-v021.sh`
+- Verification Tool: `sudo bash scripts/02-verify-jails-v030.sh`
 
 ## 🎉 Acknowledgments
 
@@ -442,6 +472,6 @@ Powered by Claude Sonnet 4.5 thinking
 
 ---
 
-**Version:** 0.21  
-**Last Updated:** December 2025  
+**Version:** 0.30
+**Last Updated:** December 19, 2025
 **Production Ready:** ✅
