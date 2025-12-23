@@ -90,14 +90,34 @@ fi
 info "Found wrapper script: $WRAPPER_SOURCE"
 echo ""
 
-# Verify wrapper version
-WRAPPER_VERSION=$(grep '^VERSION=' "$WRAPPER_SOURCE" | head -1 | cut -d'"' -f2)
-if [ "$WRAPPER_VERSION" != "$VERSION" ]; then
-    warning "Version mismatch: installer=$VERSION, wrapper=$WRAPPER_VERSION"
-    read -p "Continue anyway? (yes/no): " -r
-    if [[ ! $REPLY =~ ^[Yy](es)?$ ]]; then
-        error "Installation cancelled"
-    fi
+# Verify wrapper release/version
+WRAPPER_RELEASE=$(grep -m1 '^RELEASE=' "$WRAPPER_SOURCE" | cut -d'"' -f2)
+WRAPPER_VERSION=$(grep -m1 '^VERSION=' "$WRAPPER_SOURCE" | cut -d'"' -f2)
+
+# toleruj prefix "v"
+WRAPPER_RELEASE="${WRAPPER_RELEASE#v}"
+RELEASE="${RELEASE#v}"
+WRAPPER_VERSION="${WRAPPER_VERSION#v}"
+VERSION="${VERSION#v}"
+
+# 1) Release musí sedieť (ak to berieš ako "kompatibilitnú vetvu")
+if [ "$WRAPPER_RELEASE" != "$RELEASE" ]; then
+  warning "Release mismatch: installer=$RELEASE, wrapper=$WRAPPER_RELEASE"
+  read -r -p "Continue anyway? (yes/no): "
+  if [[ ! $REPLY =~ ^[Yy](es)?$ ]]; then
+    error "Installation cancelled"
+    exit 1
+  fi
+fi
+
+# 2) Wrapper musí byť aspoň minimálna verzia (wrapper >= required)
+if [ "$(printf '%s\n%s\n' "$VERSION" "$WRAPPER_VERSION" | sort -V | head -n1)" != "$VERSION" ]; then
+  warning "Wrapper is older than required: wrapper=$WRAPPER_VERSION < required=$VERSION"
+  read -r -p "Continue anyway? (yes/no): "
+  if [[ ! $REPLY =~ ^[Yy](es)?$ ]]; then
+    error "Installation cancelled"
+    exit 1
+  fi
 fi
 
 echo ""

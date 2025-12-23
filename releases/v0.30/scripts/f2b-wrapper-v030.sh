@@ -10,35 +10,29 @@
 # - nftables
 # - jq (JSON processor) - install: sudo apt install jq
 #
-# v0.24 CHANGES (2025-12-14):
-# + Fixed docker-block IP counting using jq for accurate element count
-# + Fixed duplicate log entries in docker-sync (removed tee -a)
-# + Improved find command docker-block detection (nft get element)
-# + Enhanced docker sync to handle nftables auto-merge ranges
-# + Updated sync messaging: info for ±1-5 diff (auto-merge normal)
-# + Fixed main() structure - moved log init to function start
-# + All v0.23 functions preserved and enhanced
-#
-# v0.23 CHANGES:
-# + Docker-block sync integration (f2b sync docker)
-# + Real-time dashboard (f2b docker dashboard)
-# + Docker info command (f2b docker info)
-# + Docker command dispatcher (f2b docker COMMAND)
-#
-# v0.30 CHANGES (2025-12-19):
-# + Docker-block v0.4 integration
-# + Enhanced IP/port blocking
-# + Fail2Ban ↔ docker-block sync
-#
+# v0.32 CHANGES (2025-12-20):
+# + NEW: Lock mechanizmus (/tmp/f2b-wrapper.lock) proti paralelným runom
+# + IMPROVED: Validácie validate_port() a validate_ip() (IPv6 check cez ip(8) + fallback)
+# + NEW: jq helpery + bezpečnejšie JSON parsovanie (nft -j …) / prettify výstupov
+# + NEW: Reporty (report json/csv/daily), audit-silent, stats-quick
+# + NEW: Attack analysis (napr. NPM HTTP status/pattern analýzy) + rozšírený version output
+
 # v0.31 CHANGES (2025-12-20):
-# + FIXED: f2b_sync_docker() - Union approach for all F2B sets
-# + FIXED: f2b_sync_docker() - nft get element with { IP } syntax
-# + FIXED: f2b_sync_docker() - Accurate IPv4/IPv6 sync (FIX v0.30)
-# + FIXED: f2b_docker_info() - Proper status display (FIX v0.30)
-# + FIXED: manage_block_port() - nft add/delete with { port } syntax
-# + FIXED: manage_unblock_port() - nft delete with { port } syntax
-# + FIXED: f2b_find() - nft get element with { IP } syntax (BONUS)
+# + FIX: docker sync union pre všetky F2B sety + správna { IP } syntax
+# + FIX: korektný IPv4/IPv6 sync + opravené docker info
+# + FIX: manage block/unblock port ({ port } syntax) + bonus fix vo f2b find
 # + All v0.30 functions preserved
+
+# v0.30 CHANGES (2025-12-19):
+# + Docker-block v0.4 integrácia + lepšie IP/port blocking + F2B ↔ docker-block sync
+
+# v0.24 CHANGES (2025-12-14):
+# + jq counting opravy, docker-sync log duplicitné zápisy fix, find cez nft get element
+# + Lepší sync pre nft auto-merge ranges + úprava main() initu
+# + All v0.23 functions preserved
+
+# v0.23 CHANGES:
+# + docker-block sync (f2b sync docker), dashboard, docker info, docker dispatcher
 ################################################################################
 
 ################################################################################
@@ -67,6 +61,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
+DARK_GRAY='\033[0;90m'
 NC='\033[0m'
 
 # Configuration
@@ -182,12 +177,23 @@ validate_ip() {
     return 0
   fi
 
-  # IPv6 (praktická validácia: hex + :, musí obsahovať aspoň jednu ':')
+  # IPv6 – jednoduchý, ale prísnejší check cez ip(8)
+  if command -v ip >/dev/null 2>&1; then
+    if ip -6 addr add "$ip/128" dev lo 2>/dev/null; then
+      ip -6 addr del "$ip/128" dev lo 2>/dev/null
+      return 0
+    else
+      logerror "Invalid IP address: $ip"
+      return 1
+    fi
+  fi
+
+  # Fallback: dnešná heuristika
   if [[ "$ip" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$ip" == *:* ]]; then
     return 0
   fi
 
-  log_error "Invalid IP address: $ip"
+  logerror "Invalid IP address: $ip"
   return 1
 }
 
@@ -237,6 +243,8 @@ jq_prettify() {
   fi
 }
 
+cleanup_tmp() { [ -n "${1:-}" ] && rm -f "$1"; }
+
 ################################################################################
 # HELPER FUNCTIONS (Fail2Ban & nftables, IPv4 + IPv6)
 ################################################################################
@@ -276,46 +284,62 @@ get_f2b_count() {
 get_f2b_ips() {
   local jail="$1"
 
-  sudo fail2ban-client status "$jail" 2>/dev/null | \
-    awk '
-      /Banned IP list:/ {
-        sub(/.*Banned IP list:[[:space:]]*/, "", $0);
+  sudo fail2ban-client status "$jail" 2>/dev/null \
+    | awk '/Banned IP list:/ {
+        sub(/^.*Banned IP list:[[:space:]]*/, "", $0);
         print;
         exit
-      }
-    ' | \
-    tr ' ' '\n' | \
-    while IFS= read -r tok; do
-      [ -z "$tok" ] && continue
-
-      # IPv4
-      if [[ "$tok" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "$tok"
-        continue
-      fi
-
-      # IPv6 (praktická validácia: hex + :, musí obsahovať aspoň jednu ':')
-      if [[ "$tok" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$tok" == *:* ]]; then
-        echo "$tok"
-        continue
-      fi
-    done | sort -u
+      }' \
+    | tr ' ' '\n' \
+    | while IFS= read -r tok; do
+        [[ -z "$tok" ]] && continue
+        # TITLE Keep current fast heuristics
+        if [[ "$tok" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+          echo "$tok"
+          continue
+        fi
+        if [[ "$tok" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$tok" == *:* ]]; then
+          echo "$tok"
+          continue
+        fi
+      done \
+    | sort -u
 }
 
 get_nft_ips() {
   local set="$1"
 
-  if [[ "$set" == *-v6 ]]; then
-    sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
-      | grep -oE '([0-9a-fA-F:]+)' \
-      | grep -F ':' \
+  # TITLE IPv4/IPv6 IP extraction from nftables set with optional JSON parsing
+
+  if jq_check_installed; then
+    # TITLE Prefer JSON parsing when jq is available (supports both elem schemas)
+    sudo nft -j list set "$F2BTABLE" "$set" 2>/dev/null \
+      | jq -r '
+          .nftables[]
+          | select(.set? and .set.elem?)
+          | .set.elem[]
+          | if type == "string" then .
+            elif type == "object" then (.elem.val // empty)
+            else empty
+            end
+        ' 2>/dev/null \
+      | sed '/^$/d' \
       | sort -u
   else
-    sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
-      | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
-      | sort -u
+    # TITLE Fallback: regex-based parsing (current behavior)
+    if [[ "$set" == *-v6 ]]; then
+      sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
+        | grep -oE '[0-9a-fA-F:]+' \
+        | grep -F ':' \
+        | sort -u
+    else
+      sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
+        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+        | sort -u
+    fi
   fi
 }
+
 
 # count_ips LIST
 #  - pomocná funkcia pre „počet riadkov IP“ s default 0
@@ -843,6 +867,111 @@ sync_silent() {
 }
 
 ################################################################################
+# F2B DOCKER VERIFY – deep sync check (IPv4)
+################################################################################
+
+f2b_docker_verify() {
+  log_header "F2B Docker-Block Deep Verify (IPv4 union)"
+
+  # 1) JAILY ↔ F2B NFT SETY
+  log_info "STEP 1: F2B jails vs F2B nft sets (IPv4 union)"
+
+  local ALL_JAILS ALL_SETS
+  local jail set
+
+  ALL_JAILS=$(
+    for jail in "${JAILS[@]}"; do
+      get_f2b_ips "$jail" 2>/dev/null \
+        | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true
+    done | sort -u
+  )
+
+  ALL_SETS=$(
+    for set in \
+      f2b-sshd \
+      f2b-sshd-slowattack \
+      f2b-exploit-critical \
+      f2b-dos-high \
+      f2b-web-medium \
+      f2b-nginx-recon-bonus \
+      f2b-recidive \
+      f2b-manualblock \
+      f2b-fuzzing-payloads \
+      f2b-botnet-signatures \
+      f2b-anomaly-detection; do
+      sudo nft list set inet fail2ban-filter "$set" 2>/dev/null \
+        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || true
+    done | sort -u
+  )
+
+  local JAIL_NOT_IN_SET SET_NOT_IN_JAIL
+  JAIL_NOT_IN_SET=$(comm -23 <(echo "$ALL_JAILS") <(echo "$ALL_SETS") || true)
+  SET_NOT_IN_JAIL=$(comm -13 <(echo "$ALL_JAILS") <(echo "$ALL_SETS") || true)
+
+  if [[ -z "$JAIL_NOT_IN_SET" && -z "$SET_NOT_IN_JAIL" ]]; then
+    log_success "Jaily a F2B nft sety sú 1:1 (IPv4 union)."
+  else
+    log_warn "Rozdiely medzi jailmi a F2B setmi (IPv4):"
+    [[ -n "$JAIL_NOT_IN_SET" ]] && {
+      echo "  - V jailoch, nie v F2B setoch:"
+      echo "$JAIL_NOT_IN_SET"
+    }
+    [[ -n "$SET_NOT_IN_JAIL" ]] && {
+      echo "  - Vo F2B setoch, nie v jailoch:"
+      echo "$SET_NOT_IN_JAIL"
+    }
+  fi
+
+  echo
+  log_info "STEP 2: F2B nft sets vs docker-block (IPv4 union)"
+
+  if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
+    log_error "docker-block table NOT FOUND (install docker-block v0.4 first)."
+    return 1
+  fi
+
+  local DOCKER_IPS
+  DOCKER_IPS=$(
+    sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+      | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u
+  )
+
+  local SET_NOT_IN_DOCKER DOCKER_NOT_IN_SET
+  SET_NOT_IN_DOCKER=$(comm -23 <(echo "$ALL_SETS") <(echo "$DOCKER_IPS") || true)
+  DOCKER_NOT_IN_SET=$(comm -13 <(echo "$ALL_SETS") <(echo "$DOCKER_IPS") || true)
+
+  if [[ -z "$SET_NOT_IN_DOCKER" && -z "$DOCKER_NOT_IN_SET" ]]; then
+    log_success "F2B sety a docker-block sú 1:1 (IPv4 union)."
+  else
+    log_info "Rozdiely medzi F2B setmi a docker-block IPv4:"
+    [[ -n "$SET_NOT_IN_DOCKER" ]] && {
+      echo "  - Vo F2B setoch, nie v docker-block:"
+      echo "$SET_NOT_IN_DOCKER"
+    }
+    [[ -n "$DOCKER_NOT_IN_SET" ]] && {
+      echo "  - V docker-block, nie vo F2B setoch:"
+      echo "$DOCKER_NOT_IN_SET"
+    }
+  fi
+
+  echo
+  log_info "STEP 3: Súhrn počtov (IPv4)"
+
+  local JAIL_UNIQUE SET_UNIQUE DOCKER_UNIQUE
+  JAIL_UNIQUE=$(echo "$ALL_JAILS"    | wc -l | tr -d '[:space:]')
+  SET_UNIQUE=$(echo "$ALL_SETS"      | wc -l | tr -d '[:space:]')
+  DOCKER_UNIQUE=$(echo "$DOCKER_IPS" | wc -l | tr -d '[:space:]')
+
+  echo "  Jaily IPv4 unique:        $JAIL_UNIQUE"
+  echo "  F2B sety IPv4 unique:     $SET_UNIQUE"
+  echo "  docker-block IPv4 unique: $DOCKER_UNIQUE"
+
+  echo
+  log_info "Poznámka: malé rozdiely (1–5 IP) môžu byť spôsobené nftables auto-merge (ranges, /31)."
+}
+
+
+################################################################################
 # F2B DOCKER SYNC (NEW v0.23)
 ################################################################################
 
@@ -1154,11 +1283,19 @@ f2b_docker_dashboard() {
     echo
     echo "RECENT ATTACKS (last hour)"
     if [ -f /var/log/fail2ban.log ]; then
-      local lasthour
-      lasthour=$(grep "$(date -d '1 hour ago' '+%Y-%m-%d %H')" /var/log/fail2ban.log 2>/dev/null \
-        | grep -c "Ban" 2>/dev/null)
+      local lasthour since1
+      since1="$(date --date='1 hour ago' '+%Y-%m-%d %H:%M:%S')"
+
+      lasthour=$(
+        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+          | awk -v since="$since1" '
+              substr($0,1,19) >= since && $0 ~ /(BanFound| Found | Ban )/ { c++ }
+              END { print c+0 }
+            '
+      )
+
       lasthour=${lasthour:-0}
-      echo "  Ban events: ${lasthour}"
+      echo "  Ban/Found events: ${lasthour}"
     else
       echo "  No fail2ban log available"
     fi
@@ -1226,19 +1363,25 @@ f2b_docker_commands() {
         sync)
             f2b_sync_docker
             ;;
+        verify)
+            f2b_docker_verify
+            ;;
         *)
             cat <<EOF
+            
 Usage: f2b docker COMMAND
 
 COMMANDS:
   dashboard     Real-time monitoring dashboard
   info          Show docker-block configuration
   sync          Synchronize fail2ban ↔ docker-block
+  verify      Deep verify of F2B ↔ docker-block sync (IPv4 union)
 
 Examples:
   sudo f2b docker dashboard
   sudo f2b docker info
   sudo f2b docker sync
+  sudo f2b docker verify
 EOF
             ;;
     esac
@@ -1732,43 +1875,58 @@ monitor_jail_log() {
 
 monitor_trends() {
     log_header "ATTACK TREND ANALYSIS"
-    if [ ! -f /var/log/fail2ban.log ]; then
-        log_error "Fail2Ban log not found"
-        return 1
-    fi
 
     echo ""
 
-    local last_hour
-    last_hour=$(grep "$(date -d '1 hour ago' +%Y-%m-%d\ %H)" /var/log/fail2ban.log 2>/dev/null \
-        | grep -c "Ban\|Found" || echo "0")
+    local since1 since6 since24
+    local last_hour last_6h last_24h
 
-    local last_6h
-    last_6h=$(grep "$(date -d '6 hours ago' +%Y-%m-%d)" /var/log/fail2ban.log 2>/dev/null \
-        | grep -c "Ban\|Found" || echo "0")
+    since1="$(date --date='1 hour ago'  '+%Y-%m-%d %H:%M:%S')"
+    since6="$(date --date='6 hours ago' '+%Y-%m-%d %H:%M:%S')"
+    since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
 
-    local last_24h
-    last_24h=$(grep "$(date -d '1 day ago' +%Y-%m-%d)" /var/log/fail2ban.log 2>/dev/null \
-        | grep -c "Ban\|Found" || echo "0")
+    last_hour="$(
+        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+          | awk -v since="$since1" '
+              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
+              END{print c+0}
+            '
+    )"
+
+    last_6h="$(
+        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+          | awk -v since="$since6" '
+              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
+              END{print c+0}
+            '
+    )"
+
+    last_24h="$(
+        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+          | awk -v since="$since24" '
+              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
+              END{print c+0}
+            '
+    )"
+
+    # Sanitize numeric values
+    last_hour="$(clean_number "$last_hour")"; [ -z "$last_hour" ] && last_hour=0
+    last_6h="$(clean_number "$last_6h")";     [ -z "$last_6h" ] && last_6h=0
+    last_24h="$(clean_number "$last_24h")";   [ -z "$last_24h" ] && last_24h=0
 
     echo -e "Last hour: ${YELLOW}$last_hour${NC} attempts"
     echo -e "Last 6h:   ${YELLOW}$last_6h${NC} attempts"
     echo -e "Last 24h:  ${YELLOW}$last_24h${NC} attempts"
     echo ""
 
-    # Sanitize numeric values
-    last_hour=$(echo "$last_hour" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
-    last_6h=$(echo "$last_6h" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
-    last_24h=$(echo "$last_24h" | tr -d '[:space:]' | grep -oE '^[0-9]+$' || echo "0")
-
-    if [ "$last_hour" -gt 50 ]; then
+    if [ "$last_hour" -gt 50 ] || [ "$last_6h" -gt 1500 ] || [ "$last_24h" -gt 3000 ]; then
         log_alert "CRITICAL: HIGH ATTACK INTENSITY!"
         echo ""
         log_info "Recommended actions:"
         log_info " • Review logs: f2b monitor jail-log <jail>"
         log_info " • Check top attackers: f2b monitor top-attackers"
         log_info " • Consider enabling stricter rules"
-    elif [ "$last_hour" -gt 20 ]; then
+    elif [ "$last_hour" -gt 20 ] || [ "$last_6h" -gt 600 ] || [ "$last_24h" -gt 1500 ]; then
         log_warn "WARNING: Elevated attack activity"
     else
         log_success "Attack levels normal"
@@ -1776,6 +1934,7 @@ monitor_trends() {
 
     echo ""
 }
+
 
 ################################################################################
 # REPORT FUNCTIONS
@@ -2026,8 +2185,9 @@ analyze_ssh_attacks() {
 
     local CUTOFF TMP_F2B
     CUTOFF="$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S')"
-    TMP_F2B="$(mktemp)"
-    awk -v c="$CUTOFF" 'substr($0,1,19) >= c {print}' /var/log/fail2ban.log > "$TMP_F2B" 2>/dev/null
+    TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
+    zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+    | awk -v c="$CUTOFF" 'substr($0,1,19) >= c {print}' > "$TMP_F2B"
 
     local SSHD_NEW SSHD_EXT SSHD_EVENTS
     local SLOW_NEW SLOW_EXT SLOW_EVENTS
@@ -2061,14 +2221,16 @@ analyze_ssh_attacks() {
 
     local FAILED_PASS=0 INVALID_USER=0 CONN_ATTEMPTS=0 PREAUTH_FAIL=0
     if [ -f /var/log/auth.log ]; then
-        local AUTH_TODAY AUTH_YESTERDAY
-        AUTH_TODAY=$(date '+%b %d')
-        AUTH_YESTERDAY=$(date -d '1 day ago' '+%b %d')
+      local AUTH_TODAY AUTH_YESTERDAY AUTH_LINES
+      AUTH_TODAY=$(date '+%b %d')
+      AUTH_YESTERDAY=$(date -d '1 day ago' '+%b %d')
 
-        FAILED_PASS=$(clean_number "$(grep -E "^($AUTH_TODAY|$AUTH_YESTERDAY)" /var/log/auth.log 2>/dev/null | grep -c "Failed password" || echo "0")")
-        INVALID_USER=$(clean_number "$(grep -E "^($AUTH_TODAY|$AUTH_YESTERDAY)" /var/log/auth.log 2>/dev/null | grep -c "Invalid user" || echo "0")")
-        CONN_ATTEMPTS=$(clean_number "$(grep -E "^($AUTH_TODAY|$AUTH_YESTERDAY)" /var/log/auth.log 2>/dev/null | grep -c "Connection from" || echo "0")")
-        PREAUTH_FAIL=$(clean_number "$(grep -E "^($AUTH_TODAY|$AUTH_YESTERDAY)" /var/log/auth.log 2>/dev/null | grep -c "Disconnected from authenticating user" || echo "0")")
+      AUTH_LINES=$(grep -E "^($AUTH_TODAY|$AUTH_YESTERDAY)" /var/log/auth.log 2>/dev/null || echo "")
+
+      FAILED_PASS=$(clean_number "$(echo "$AUTH_LINES" | grep -c "Failed password" || echo 0)")
+      INVALID_USER=$(clean_number "$(echo "$AUTH_LINES" | grep -c "Invalid user" || echo 0)")
+      CONN_ATTEMPTS=$(clean_number "$(echo "$AUTH_LINES" | grep -c "Connection from" || echo 0)")
+      PREAUTH_FAIL=$(clean_number "$(echo "$AUTH_LINES" | grep -c "Disconnected from authenticating user" || echo 0)")
     fi
 
     printf " %-20s %d attempts\n" "Failed Passwords:" "$FAILED_PASS"
@@ -2090,13 +2252,14 @@ analyze_ssh_attacks() {
             | while IFS= read -r line; do
                 local timestamp ip
                 timestamp=$(echo "$line" | awk '{print $1, $2}' | cut -d',' -f1)
-                ip=$(echo "$line" | grep -oP ' Ban \K[0-9.]+')
+                ip=$(echo "$line" \
+                | awk '{for(i=1;i<=NF;i++) if($i=="Ban"){ip=$(i+1); sub(/[.,]$/,"",ip); print ip; break}}')
                 [ -n "$ip" ] && printf "  %s → %s\n" "$timestamp" "$ip"
             done
         echo ""
     fi
 
-    rm -f "$TMP_F2B"
+    cleanup_tmp "$TMP_F2B"
 
     export TOTAL_SSH_ATTACKS="$SSH_ATTEMPTS"
     export SSH_BAN_EVENTS="$TOTAL_SSH_BAN_EVENTS"
@@ -2115,50 +2278,83 @@ analyze_ssh_top_attackers() {
 
     local CUTOFF TMP_F2B
     CUTOFF="$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S')"
-    TMP_F2B="$(mktemp)"
-    awk -v c="$CUTOFF" 'substr($0,1,19) >= c {print}' /var/log/fail2ban.log > "$TMP_F2B" 2>/dev/null
+    TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
 
-    # Prefer attempt markers; fallback to Ban (new only)
-    local IP_STREAM
-    if grep -Eq '\[(sshd|sshd-slowattack)\].*(BanFound| Found )' "$TMP_F2B" 2>/dev/null; then
-        IP_STREAM=$(
-            grep -E '\[(sshd|sshd-slowattack)\]' "$TMP_F2B" 2>/dev/null | \
-            grep -E 'BanFound| Found ' | \
-            grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
-        )
-        # label could be "attempts"
-    else
-        IP_STREAM=$(
-            grep -E '\[(sshd|sshd-slowattack)\]' "$TMP_F2B" 2>/dev/null | \
-            grep ' Ban ' | grep -v 'Increase Ban' | \
-            grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
-        )
-        # fallback label could be "bans"
-    fi
+    # 24h window, rotácia-safe
+    zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+      | awk -v c="$CUTOFF" 'substr($0,1,19) >= c {print}' > "$TMP_F2B"
+
+    # Vyber len SSH jaily (sshd + sshd-slowattack) a vytiahni IP (IPv4 alebo IPv6)
+# Prefer attempt markers; fallback to Ban (new only)
+local IP_STREAM
+if grep -Eq '\[(sshd|sshd-slowattack)\].*(BanFound| Found )' "$TMP_F2B" 2>/dev/null; then
+    IP_STREAM="$(
+        grep -E '\[(sshd|sshd-slowattack)\]' "$TMP_F2B" 2>/dev/null \
+          | grep -E 'BanFound| Found ' \
+          | awk '
+              {
+                for (i=1; i<=NF; i++) {
+                  if ($i=="BanFound" || $i=="Found") {
+                    ip=$(i+1)
+                    sub(/[.,]$/, "", ip)   # fail2ban log často dáva bodku za IP
+                    print ip
+                    break
+                  }
+                }
+              }'
+    )"
+else
+    IP_STREAM="$(
+        grep -E '\[(sshd|sshd-slowattack)\]' "$TMP_F2B" 2>/dev/null \
+          | grep ' Ban ' | grep -v 'Increase Ban' \
+          | awk '
+              {
+                for (i=1; i<=NF; i++) {
+                  if ($i=="Ban") {
+                    ip=$(i+1)
+                    sub(/[.,]$/, "", ip)
+                    print ip
+                    break
+                  }
+                }
+              }'
+    )"
+fi
 
     if [ -z "$IP_STREAM" ]; then
         echo "  No attacks detected"
-        rm -f "$TMP_F2B"
+        cleanup_tmp "$TMP_F2B"
         echo ""
         return 0
     fi
-
+    # dočasný debug – TERAZ VYHODIŤ
+    # echo "$IP_STREAM" | head -20 >&2
     echo "$IP_STREAM" | sort | uniq -c | sort -rn | head -10 | \
     while read -r count ip; do
-        local BANNED=""
-        if sudo nft get element inet docker-block docker-banned-ipv4 "{ $ip }" &>/dev/null 2>&1; then
-            BANNED="DOCKER-BLOCKED"
-        elif sudo fail2ban-client status sshd 2>/dev/null | grep -q "$ip"; then
+        local BANNED="(unbanned)"
+
+        # Fail2Ban (sshd, sshd-slowattack) – get banned <IP> → 1/0
+        if sudo fail2ban-client get sshd banned "$ip" 2>/dev/null | grep -qx "1" \
+           || sudo fail2ban-client get sshd-slowattack banned "$ip" 2>/dev/null | grep -qx "1"; then
             BANNED="F2B-BANNED"
-        elif sudo nft list set inet fail2ban-filter f2b-sshd 2>/dev/null | grep -q "$ip"; then
-            BANNED="NFT-BLOCKED"
-        else
-            BANNED="(unbanned)"
         fi
-        printf "  %-15s %6d attempts  %s\n" "$ip" "$count" "$BANNED"
+
+        # nftables fail2ban-filter (v4 + v6)
+        if sudo nft get element inet fail2ban-filter f2b-sshd "{ $ip }" &>/dev/null 2>&1 \
+           || sudo nft get element inet fail2ban-filter f2b-sshd-v6 "{ $ip }" &>/dev/null 2>&1; then
+            BANNED="NFT-BLOCKED"
+        fi
+
+        # docker-block (v4 + v6)
+        if sudo nft get element inet docker-block docker-banned-ipv4 "{ $ip }" &>/dev/null 2>&1 \
+           || sudo nft get element inet docker-block docker-banned-ipv6 "{ $ip }" &>/dev/null 2>&1; then
+            BANNED="DOCKER-BLOCKED"
+        fi
+
+        printf "  %-39s %6d attempts  %s\n" "$ip" "$count" "$BANNED"
     done
 
-    rm -f "$TMP_F2B"
+    cleanup_tmp "$TMP_F2B"
     echo ""
 }
 
@@ -2239,39 +2435,56 @@ security_summary_recommendations() {
     log_header "╚════════════════════════════════════════════════════════════╝"
     echo ""
 
-    # Get Fail2Ban banned count (OPRAVENÉ)
+    # Get Fail2Ban banned count
     local TOTAL_BANNED=0
+    local count
     for jail in $(sudo fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://;s/,//g'); do
         count=$(sudo fail2ban-client status "$jail" 2>/dev/null | grep "Currently banned" | awk '{print $4}')
-        if [ ! -z "$count" ]; then
+        if [ -n "$count" ]; then
             TOTAL_BANNED=$((TOTAL_BANNED + count))
         fi
     done
-    TOTAL_BANNED=$(clean_number "$TOTAL_BANNED")
+    TOTAL_BANNED="$(clean_number "$TOTAL_BANNED")"
 
     # Get Docker-block count
     local DOCKER_BLOCKED
     if jq_check_installed; then
-        DOCKER_BLOCKED=$(clean_number "$(sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null | \
-            jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)")
+        DOCKER_BLOCKED="$(clean_number "$(
+            sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
+                | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null \
+                | head -1
+        )")"
     else
-        DOCKER_BLOCKED=$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null | \
-            grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
+        DOCKER_BLOCKED="$(
+            sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+                | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+                | wc -l
+        )"
+        DOCKER_BLOCKED="$(clean_number "$DOCKER_BLOCKED")"
     fi
 
-    # Get attack detections (fallback ak export zlyhal)
+    # Get attack detections (fallback if export failed)
     local NPM_DETECTED="${TOTAL_NPM_ATTACKS:-0}"
     local SSH_DETECTED="${TOTAL_SSH_ATTACKS:-0}"
 
-    # Get total attempts from fail2ban.log (same method as trends)
-    local day_ago
+    # Get total attempts from fail2ban logs (real last-24h window, incl. rotated)
+    local since
     local TOTAL_ATTEMPTS_RAW
     local TOTAL_ATTEMPTS
 
-    day_ago="$(date --date='24 hours ago' '+%Y-%m-%d')"
-    TOTAL_ATTEMPTS_RAW="$(grep "$day_ago" /var/log/fail2ban.log 2>/dev/null | grep -c 'Ban\|Found' || echo "0")"
+    since="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
+
+    TOTAL_ATTEMPTS_RAW="$(
+        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+            | awk -v since="$since" '
+                substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ { c++ }
+                END { print c+0 }
+            '
+    )"
+
     TOTAL_ATTEMPTS="$(clean_number "$TOTAL_ATTEMPTS_RAW")"
     [ -z "$TOTAL_ATTEMPTS" ] && TOTAL_ATTEMPTS=0
+
 
     echo "Protection Status:"
     echo "  • Fail2Ban Banned:     $TOTAL_BANNED IPs"
@@ -2279,7 +2492,6 @@ security_summary_recommendations() {
     echo "  • NPM Attacks Detected: $NPM_DETECTED"
     echo "  • SSH Attacks Detected: $SSH_DETECTED"
     echo ""
-
     echo "Attack Summary (24h):"
     echo "  • Total Attack Attempts: $TOTAL_ATTEMPTS"
 
@@ -2290,21 +2502,21 @@ security_summary_recommendations() {
     fi
     echo ""
 
-    # Risk assessment (OPRAVENÉ thresholds)
-    if [ "$TOTAL_ATTEMPTS" -gt 10000 ]; then
+    # Risk assessment (aligned more with timeline)
+    if [ "$TOTAL_ATTEMPTS" -gt 3000 ]; then
         log_alert "⚠️  CRITICAL - Very high attack activity"
         echo ""
         echo "Recommendations:"
         echo "  • Monitor: sudo f2b monitor watch"
         echo "  • Review: sudo f2b monitor top-attackers"
         echo "  • Check: sudo f2b docker dashboard"
-    elif [ "$TOTAL_ATTEMPTS" -gt 5000 ]; then
+    elif [ "$TOTAL_ATTEMPTS" -gt 1500 ]; then
         log_warn "⚠️  WARNING - Elevated attack activity"
         echo ""
         echo "Recommendations:"
         echo "  • Review: sudo f2b monitor trends"
         echo "  • Check: sudo f2b monitor top-attackers"
-    elif [ "$TOTAL_ATTEMPTS" -gt 1000 ]; then
+    elif [ "$TOTAL_ATTEMPTS" -gt 500 ]; then
         log_info "🟡 MODERATE - Normal attack pattern"
         echo ""
         log_success "✅ Defenses are working effectively"
@@ -2316,6 +2528,7 @@ security_summary_recommendations() {
 
     echo ""
 }
+
 
 report_attack_analysis() {
     local mode="${1:-all}"
@@ -2396,22 +2609,34 @@ report_attack_timeline() {
     local -a counts
     local max_count=0
     local total_count=0
-
     # Collect data for each hour (going backwards 24 hours)
+    local TMP_F2B since24
+    TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
+    since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
+
+    zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+      | awk -v s="$since24" 'substr($0,1,19) >= s {print}' > "$TMP_F2B"
+
     for i in {23..0}; do
-        local hour_ago=$(date -d "$i hours ago" '+%Y-%m-%d %H')
-        local count=$(grep "$hour_ago" /var/log/fail2ban.log 2>/dev/null | grep -c "Ban\|Found" || echo "0")
-        count=$(clean_number "$count")
-        
-        hours+=("$(date -d "$i hours ago" '+%H:00')")
-        counts+=("$count")
-        total_count=$((total_count + count))
-        
-        # Track maximum for scaling
-        if [ "$count" -gt "$max_count" ]; then
-            max_count=$count
-        fi
+      local hour_start hour_end count
+      hour_start="$(date -d "$i hours ago" '+%Y-%m-%d %H:00:00')"
+      hour_end="$(date -d "$i hours ago" '+%Y-%m-%d %H:59:59')"
+
+      count="$(
+        awk -v s="$hour_start" -v e="$hour_end" '
+          substr($0,1,19) >= s && substr($0,1,19) <= e && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
+          END{print c+0}
+        ' "$TMP_F2B"
+      )"
+      count="$(clean_number "$count")"
+
+      hours+=("$(date -d "$i hours ago" '+%H:00')")
+      counts+=("$count")
+      total_count=$((total_count + count))
+      [ "$count" -gt "$max_count" ] && max_count=$count
     done
+
+    cleanup_tmp "$TMP_F2B"
 
     # Calculate average
     local avg_count=$((total_count / 24))
@@ -2527,9 +2752,11 @@ SYNC:
   sync docker                 Docker-block sync
 
 DOCKER:
+  docker COMMAND              Docker only related commands
   docker dashboard            Real-time monitoring dashboard
   docker info                 Show docker-block configuration
   docker sync                 Synchronize fail2ban ↔ docker-block
+  docker verify               Deep verify of F2B ↔ docker-block sync (IPv4 union)
 
 MANAGE - PORT BLOCKING:
   manage block-port <port>           Block Docker port
