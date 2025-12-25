@@ -94,8 +94,8 @@ sudo f2b manage unban-all <IP># Unban from all jails
 
 For full installation and troubleshooting instructions, follow:
 
-- `releases/v0.30/docs/README-v030.md`
-- `releases/v0.30/docs/PACKAGE-INFO-v030.txt`
+- `releases/v0.31/docs/README-v031.md`
+- `releases/v0.31/docs/PACKAGE-INFO-v031.txt`
 
 ## What's New in v0.31
 
