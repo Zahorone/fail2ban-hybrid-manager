@@ -1,0 +1,186 @@
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║    Fail2Ban + nftables v0.31 - Production Bundle               ║
+║      One-Click IPv4 + IPv6 + Docker-Block Security System      ║
+║                 (Immediate Docker Ban Edition)                 ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+VERSION: 0.31
+WRAPPER VERSION: 0.32
+RELEASE DATE: December 26, 2025
+UPGRADE FROM: v0.19–v0.30 (auto-detect)
+LICENSE: MIT
+
+
+═══════════════════════════════════════════════════════════════════
+KEY CHANGES IN v0.31
+═══════════════════════════════════════════════════════════════════
+
+🚀 IMMEDIATE DOCKER-BLOCK BAN (NO CRON DELAY):
+  ✅ New Fail2Ban action: docker-sync-hook.conf
+     • Calls f2b-docker-hook.sh on ban/unban
+     • Parameters: ban|unban <ip> <jail> <bantime>
+  ✅ f2b-docker-hook.sh:
+     • Adds/removes IP to/from nftables sets:
+       - docker-banned-ipv4
+       - docker-banned-ipv6
+     • Uses table inet docker-block
+     • Sets element timeout equal to Fail2Ban bantime
+  ✅ Result:
+     • Docker traffic is blocked immediately when Fail2Ban bans an IP
+     • Cron is used only for validation/repair, not for initial ban
+
+🧩 CONSOLIDATED v0.31 STRUCTURE:
+  ✅ Finalized nftables layout (same counts as v0.30):
+     • 11 IPv4 sets + 11 IPv6 sets (f2b-*)
+     • 22 INPUT rules (11 IPv4 + 11 IPv6)
+     • 6 FORWARD rules (backend protection)
+  ✅ 11 Fail2Ban jails + 11 detection filters:
+     • sshd, sshd-slowattack
+     • f2b-exploit-critical, f2b-dos-high, f2b-web-medium
+     • nginx-recon-optimized, recidive, manualblock
+     • f2b-fuzzing-payloads, f2b-botnet-signatures, f2b-anomaly-detection
+  ✅ Unified naming and inet family:
+     • addr_set = f2b-<name> (IPv4)
+     • addr_set = f2b-<name>-v6 (IPv6)
+     • table = fail2ban-filter
+     • chain = f2b-input
+     • table_family = inet
+
+📊 WRAPPER v0.32 (v0.31 RELEASE WRAPPER):
+  ✅ Lock mechanism:
+     • Uses /tmp/f2b-wrapper.lock to prevent concurrent runs
+  ✅ Improved validation:
+     • IPv6 validation via ip(8) with safe fallback
+     • Stricter port validation
+  ✅ jq helpers:
+     • jq_safe_parse and jq_prettify for safe nft -j JSON parsing
+  ✅ Extended reporting:
+     • f2b report json / csv / daily
+     • f2b report attack-analysis (NPM + SSH)
+     • f2b audit-silent (silent mode for cron)
+     • f2b stats-quick (fast summary)
+  ✅ Metadata:
+     • Unified RELEASE / VERSION / BUILD_DATE / COMPONENT_NAME headers
+
+🐋 DOCKER-BLOCK v0.4 + VALIDATE MODE:
+  ✅ docker-block table (inet docker-block):
+     • docker-blocked-ports (service ports)
+     • docker-banned-ipv4 / docker-banned-ipv6
+  ✅ Validate cron (instead of primary banning):
+     • Root cron runs every minute:
+       - f2b docker sync validate
+     • Uses flock locking
+     • Logs to /var/log/f2b-docker-sync.log
+  ✅ Purpose:
+     • Validate and repair docker-block sets according to Fail2Ban
+     • Primary ban path is now the immediate hook (f2b-docker-hook.sh)
+
+🧹 SAFE PRE-CLEANUP AND AUTO-SYNC (UPDATED FOR v0.31):
+  ✅ 00-pre-cleanup-v031.sh:
+     • Backups: nftables ruleset + fail2ban configs
+     • Cleans legacy systemd units, cron entries and aliases from older versions
+  ✅ 05-install-auto-sync-v031.sh:
+     • Performs initial full Fail2Ban → nftables sync (IPv4 + IPv6)
+     • Compares IP counts and prints a summary for auditing
+
+
+═══════════════════════════════════════════════════════════════════
+PACKAGE CONTENTS (v0.31)
+═══════════════════════════════════════════════════════════════════
+
+📦 ROOT:
+  ✅ INSTALL-ALL-v031.sh              Universal installer (one-click v0.31)
+  ✅ README.md                        Main usage guide (updated for v0.31)
+  ✅ CHANGELOG.md                     Version history (includes v0.31)
+  ✅ PACKAGE-INFO.txt                 This file
+
+📂 scripts/ (core logic):
+  ✅ 00-pre-cleanup-v031.sh           Pre-install cleanup, backup, legacy removal
+  ✅ 01-install-nftables-v031.sh      nftables infrastructure (11+11 sets, 22+6 rules)
+  ✅ 02-install-jails-v031.sh         Jails + filters + actions installer
+  ✅ 02-verify-jails-v031.sh          Post-install verifier (banactions, timeouts, counts)
+  ✅ 03-install-docker-block-v031.sh  Docker port + IP blocking (inet docker-block)
+  ✅ 04-install-wrapper-v031.sh       F2B wrapper installer (v0.32 → /usr/local/bin/f2b)
+  ✅ 05-install-auto-sync-v031.sh     Initial auto-sync (Fail2Ban → nftables)
+  ✅ 06-install-aliases-v031.sh       Minimal f2b-* aliases (optional)
+  ✅ 07-setup-docker-sync-cron-v031.sh Docker-block validate cron (every minute)
+  ✅ f2b-wrapper-v031.sh              Main wrapper (50+ functions, version 0.32)
+  ✅ f2b-docker-hook.sh               Immediate docker-block ban/unban hook
+
+📂 filters/ (11 detection filters):
+  ✅ sshd.conf                        SSH brute-force (multi-mode, slowattack)
+  ✅ f2b-exploit-critical.conf        Critical exploit scanners
+  ✅ f2b-dos-high.conf                DoS/DDoS patterns
+  ✅ f2b-web-medium.conf              Web attacks (SQLi, path traversal, etc.)
+  ✅ nginx-recon-optimized.conf       Nginx reconnaissance
+  ✅ f2b-fuzzing-payloads.conf        Fuzzing payloads
+  ✅ f2b-botnet-signatures.conf       Botnet/scanner signatures
+  ✅ f2b-anomaly-detection.conf       Anomaly patterns
+  ✅ manualblock.conf                 Manual IP banning
+  ✅ recidive.conf                    Recidive jail (30d ban)
+  ✅ jail.local                       11 jails (correct banaction mapping + docker hook)
+
+📂 config/ (custom config):
+  ✅ nginx-recon-optimized.local      Filter extension (ignoreregex, tuning)
+  ✅ f2b-anomaly-detection.local      Filter extension (ignoreregex, tuning)
+
+📂 action.d/ (nftables and docker actions):
+  ⭐ nftables-common.local            Table override (inet fail2ban-filter) [CRITICAL]
+  ⭐ nftables-multiport.conf          Generic 7d action (IPv4+IPv6)
+  ⭐ nftables-recidive.conf           30d recidive action (FORWARD + INPUT, IPv4 only)
+  ⭐ nftables.conf.local              Common nftables overrides (inet, f2b-input)
+  ⭐ docker-sync-hook.conf            Fail2Ban action calling f2b-docker-hook.sh
+
+
+═══════════════════════════════════════════════════════════════════
+UPGRADE PATHS
+═══════════════════════════════════════════════════════════════════
+
+FROM v0.30:
+  ✅ Run:
+     • sudo bash INSTALL-ALL-v031.sh
+  ✅ Installer will:
+     • Preserve all existing bans (Fail2Ban + nftables)
+     • Update wrapper from v0.30 to v0.32
+     • Enable immediate docker-block ban via f2b-docker-hook.sh
+     • Switch cron to "f2b docker sync validate" mode
+     • Keep existing nftables structure (11+11 sets, 22 INPUT, 6 FORWARD)
+
+FROM v0.19 / v0.20 / v0.22 / v0.24:
+  ✅ Recommended:
+     • Upgrade to v0.30 first using the previous MIGRATION-GUIDE
+     • Then run the v0.31 installer:
+       - sudo bash INSTALL-ALL-v031.sh
+
+CLEAN INSTALL (new server):
+  ✅ INSTALL-ALL-v031.sh:
+     • Creates full nftables + Fail2Ban + Docker-block + sync setup
+     • Installs wrapper v0.32 and auto-sync
+     • Configures docker-block validate cron
+     • Adds minimal wrapper aliases (optional)
+
+
+═══════════════════════════════════════════════════════════════════
+QUICK VERIFY AFTER INSTALL (v0.31)
+═══════════════════════════════════════════════════════════════════
+
+1) Check nftables structure
+sudo nft list table inet fail2ban-filter
+sudo nft list table inet docker-block
+
+2) Check jails
+sudo fail2ban-client status
+sudo fail2ban-client status sshd
+
+3) Wrapper & sync
+sudo f2b status
+sudo f2b sync check
+sudo f2b docker info
+sudo f2b docker dashboard
+
+4) Optional deep verify
+sudo bash 02-verify-jails-v031.sh
+
+If all checks pass and counts match (11 sets v4, 11 sets v6, 22 INPUT, 6 FORWARD, 11 jails) and docker-block bans are applied immediately on ban events, your system is fully protected with the v0.31 bundle.

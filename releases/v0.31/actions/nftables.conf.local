@@ -1,0 +1,14 @@
+# Fail2Ban Hybrid Manager v0.31
+# Fail2Ban Action: nftables.conf.local
+# Date: 2025-12-26
+# Managed by: INSTALL-ALL-v031 bundle
+
+[Init]
+# Force single naming scheme across the whole stack
+addr_set = f2b-<name>
+
+# Match your nftables design
+table = fail2ban-filter
+chain = f2b-input
+blocktype = drop
+tablefamily = inet

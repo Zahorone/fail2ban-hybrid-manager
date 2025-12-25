@@ -37,6 +37,7 @@
 
 ################################################################################
 # Component: F2B Wrapper
+#
 # Part of: Fail2Ban Hybrid Nftables Manager
 ################################################################################
 
@@ -44,7 +45,7 @@ set -o pipefail
 
 # Meta
 # shellcheck disable=SC2034
-RELEASE="v0.30"
+RELEASE="v0.31"
 # shellcheck disable=SC2034
 VERSION="0.32"
 # shellcheck disable=SC2034
@@ -923,60 +924,52 @@ f2b_docker_verify() {
   fi
 
   echo
-  log_info "STEP 2: F2B nft sets vs docker-block (IPv4 union)"
+  log_info "STEP 2: Membership check: ALL F2B nft IPs are contained in docker-block (IPv4 union)"
 
   if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
     log_error "docker-block table NOT FOUND (install docker-block v0.4 first)."
     return 1
   fi
 
-  local DOCKER_IPS
-  DOCKER_IPS=$(
-    sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-      | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u
-  )
+  local miss_count=0
+  local max_sample=20
 
-  local SET_NOT_IN_DOCKER DOCKER_NOT_IN_SET
-  SET_NOT_IN_DOCKER=$(comm -23 <(echo "$ALL_SETS") <(echo "$DOCKER_IPS") || true)
-  DOCKER_NOT_IN_SET=$(comm -13 <(echo "$ALL_SETS") <(echo "$DOCKER_IPS") || true)
+  while read -r ip; do
+    sudo nft get element inet docker-block docker-banned-ipv4 "{ $ip }" >/dev/null 2>&1 \
+      || {
+        miss_count=$((miss_count+1))
+        if [ "$miss_count" -le "$max_sample" ]; then
+          log_warn "MISS $ip"
+        fi
+      }
+  done < <(echo "$ALL_SETS")
 
-  if [[ -z "$SET_NOT_IN_DOCKER" && -z "$DOCKER_NOT_IN_SET" ]]; then
-    log_success "F2B sety a docker-block sú 1:1 (IPv4 union)."
+  if [ "$miss_count" -eq 0 ]; then
+    log_success "docker-block obsahuje všetky IP z F2B setov (0 misses)."
   else
-    log_info "Rozdiely medzi F2B setmi a docker-block IPv4:"
-    [[ -n "$SET_NOT_IN_DOCKER" ]] && {
-      echo "  - Vo F2B setoch, nie v docker-block:"
-      echo "$SET_NOT_IN_DOCKER"
-    }
-    [[ -n "$DOCKER_NOT_IN_SET" ]] && {
-      echo "  - V docker-block, nie vo F2B setoch:"
-      echo "$DOCKER_NOT_IN_SET"
-    }
+    log_warn "docker-block NEobsahuje všetky IP z F2B setov: misses=$miss_count (vypísané prvé $max_sample)."
+    return 2
   fi
 
   echo
   log_info "STEP 3: Súhrn počtov (IPv4)"
 
-  local JAIL_UNIQUE SET_UNIQUE DOCKER_UNIQUE
-  JAIL_UNIQUE=$(echo "$ALL_JAILS"    | wc -l | tr -d '[:space:]')
-  SET_UNIQUE=$(echo "$ALL_SETS"      | wc -l | tr -d '[:space:]')
-  DOCKER_UNIQUE=$(echo "$DOCKER_IPS" | wc -l | tr -d '[:space:]')
+  local JAIL_UNIQUE SET_UNIQUE
+  JAIL_UNIQUE=$(echo "$ALL_JAILS" | wc -l | tr -d '[:space:]')
+  SET_UNIQUE=$(echo "$ALL_SETS"  | wc -l | tr -d '[:space:]')
 
-  echo "  Jaily IPv4 unique:        $JAIL_UNIQUE"
-  echo "  F2B sety IPv4 unique:     $SET_UNIQUE"
-  echo "  docker-block IPv4 unique: $DOCKER_UNIQUE"
-
+  echo "  Jaily IPv4 unique:       $JAIL_UNIQUE"
+  echo "  F2B sety IPv4 unique:    $SET_UNIQUE"
   echo
-  log_info "Poznámka: malé rozdiely (1–5 IP) môžu byť spôsobené nftables auto-merge (ranges, /31)."
+  log_info "Poznámka: reálna konzistencia F2B → docker-block sa rieši v STEP 2 (nftables interval/auto-merge robí plain count porovnania nepresné)."
 }
-
 
 ################################################################################
 # F2B DOCKER SYNC (NEW v0.23)
 ################################################################################
 
-# f2b_sync_docker – bidirectional union sync F2B ↔ docker-block (IPv4 + IPv6)
-f2b_sync_docker() {
+# f2b_sync_docker_full – bidirectional union sync F2B ↔ docker-block (IPv4 + IPv6)
+f2b_sync_docker_full() {
   log_header "F2B Docker-Block Bidirectional Sync"
   echo
 
@@ -1218,6 +1211,195 @@ fi
 }
 
 ################################################################################
+# F2B DOCKER SYNC (VALIDATION-ONLY) v0.31
+# Purpose: Check & fix inconsistencies; immediate bans handled by docker-sync-hook
+################################################################################
+
+f2b_sync_docker() {
+  log_header "F2B Docker-Block Validation Sync (Consistency Check)"
+  echo ""
+
+  # Pre-sync: synchronizuj F2B ↔ nft fail2ban-filter
+  log_info "Pre-sync: synchronizing Fail2Ban nftables..."
+  sync_silent
+  echo ""
+
+  if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
+    log_error "docker-block table NOT FOUND"
+    log_info "Install with: bash 03-install-docker-block-v04.sh"
+    echo ""
+    return 1
+  fi
+
+  local LOGFILE="/var/log/f2b-docker-sync.log"
+  sudo touch "$LOGFILE" 2>/dev/null || true
+  log_info "Starting docker-block validation sync (union of all F2B sets)..."
+  log_info "NOTE: Immediate bans are handled by fail2ban hook (docker-sync-hook action)"
+  echo ""
+
+  local SETS=(
+    "f2b-sshd"
+    "f2b-sshd-slowattack"
+    "f2b-exploit-critical"
+    "f2b-dos-high"
+    "f2b-web-medium"
+    "f2b-nginx-recon-bonus"
+    "f2b-recidive"
+    "f2b-manualblock"
+    "f2b-fuzzing-payloads"
+    "f2b-botnet-signatures"
+    "f2b-anomaly-detection"
+  )
+
+  ##############################################################################
+  # IPv4 VALIDATION – Remove orphaned IPs (docker-block IPs no longer in F2B)
+  ##############################################################################
+
+  # 1. Gather all IPv4 from F2B sets
+  local F2BIPS
+  F2BIPS=$(
+    for SET in "${SETS[@]}"; do
+      sudo nft list set inet fail2ban-filter "${SET}" 2>/dev/null \
+        | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' || true
+    done | sort -u
+  )
+
+  # 2. REMOVE orphaned IPs from docker-block (in docker-block but NOT in F2B)
+  local REMOVED=0
+  local DOCKERIPS
+  DOCKERIPS=$(
+    sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+      | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' \
+      | sort -u || true
+  )
+
+  while IFS= read -r IP; do
+    [ -z "$IP" ] && continue
+    if ! echo "$F2BIPS" | grep -qx "$IP"; then
+      sudo nft delete element inet docker-block docker-banned-ipv4 "{ $IP }" 2>/dev/null || true
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [SYNC] REMOVED IPv4 $IP (no longer in Fail2Ban)" \
+        | sudo tee -a "$LOGFILE" >/dev/null
+      REMOVED=$((REMOVED + 1))
+    fi
+  done <<<"$DOCKERIPS"
+
+  ##############################################################################
+  # IPv6 VALIDATION – Remove orphaned IPv6 addresses
+  ##############################################################################
+
+  local F2BIPS6
+  F2BIPS6=$(
+    for SET in "${SETS[@]}"; do
+      sudo nft list set inet fail2ban-filter "${SET}-v6" 2>/dev/null \
+        | grep -oE '[0-9a-fA-F:]+' \
+        | grep -F ':' || true
+    done | sort -u
+  )
+
+  local REMOVED6=0
+  local DOCKERIPS6
+  DOCKERIPS6=$(
+    sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
+      | grep -oE '[0-9a-fA-F:]+' \
+      | grep -F ':' \
+      | sort -u || true
+  )
+
+  while IFS= read -r IP; do
+    [ -z "$IP" ] && continue
+    if ! echo "$F2BIPS6" | grep -qx "$IP"; then
+      sudo nft delete element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
+      echo "$(date '+%Y-%m-%d %H:%M:%S') [SYNC] REMOVED IPv6 $IP (no longer in Fail2Ban)" \
+        | sudo tee -a "$LOGFILE" >/dev/null
+      REMOVED6=$((REMOVED6 + 1))
+    fi
+  done <<<"$DOCKERIPS6"
+
+  ##############################################################################
+  # METRICS – Compare counts
+  ##############################################################################
+
+  local ALL4 ALL6
+  ALL4="$(
+    for jail in "${JAILS[@]}"; do
+      get_f2b_ips "$jail" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true
+    done
+  )"
+  ALL6="$(
+    for jail in "${JAILS[@]}"; do
+      get_f2b_ips "$jail" | grep -F ':' || true
+    done
+  )"
+
+  local TOTAL4 TOTAL6 UNIQUE4 UNIQUE6 DUP4 DUP6
+  TOTAL4=0; TOTAL6=0; UNIQUE4=0; UNIQUE6=0; DUP4=0; DUP6=0
+
+  if [ -n "$ALL4" ]; then
+    TOTAL4="$(echo "$ALL4" | wc -l | tr -d '[:space:]')"
+    UNIQUE4="$(echo "$ALL4" | sort -u | wc -l | tr -d '[:space:]')"
+    [ "$TOTAL4" -gt "$UNIQUE4" ] && DUP4=$((TOTAL4 - UNIQUE4))
+  fi
+
+  if [ -n "$ALL6" ]; then
+    TOTAL6="$(echo "$ALL6" | wc -l | tr -d '[:space:]')"
+    UNIQUE6="$(echo "$ALL6" | sort -u | wc -l | tr -d '[:space:]')"
+    [ "$TOTAL6" -gt "$UNIQUE6" ] && DUP6=$((TOTAL6 - UNIQUE6))
+  fi
+
+  local DOCKER4 DOCKER6
+  DOCKER4=0
+  DOCKER6=0
+
+  if jq_check_installed; then
+    DOCKER4="$(sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
+      | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
+    DOCKER6="$(sudo nft -j list set inet docker-block docker-banned-ipv6 2>/dev/null \
+      | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
+  else
+    DOCKER4="$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+      | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l | tr -d '[:space:]')"
+    DOCKER6="$(sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
+      | grep -oE '([0-9a-fA-F:]+)' | grep -F ':' | wc -l | tr -d '[:space:]')"
+  fi
+
+  DOCKER4="${DOCKER4:-0}"
+  DOCKER6="${DOCKER6:-0}"
+
+  log_header "SYNC METRICS & VALIDATION REPORT"
+  loginfo "Jails IPv4: total=$TOTAL4 (dup=$DUP4, unique=$UNIQUE4)"
+  loginfo "Jails IPv6: total=$TOTAL6 (dup=$DUP6, unique=$UNIQUE6)"
+  loginfo "Docker-block IPv4 elements: $DOCKER4 (auto-merge may differ from unique IPs)"
+  loginfo "Docker-block IPv6 elements: $DOCKER6 (auto-merge may differ from unique IPs)"
+  loginfo "Removed (orphaned): IPv4=$REMOVED, IPv6=$REMOVED6"
+  echo ""
+
+  # Diff check
+  local DIFF4 DIFF6 DIFF4ABS DIFF6ABS
+  DIFF4=$((UNIQUE4 - DOCKER4)); DIFF4ABS=${DIFF4#-}
+  DIFF6=$((UNIQUE6 - DOCKER6)); DIFF6ABS=${DIFF6#-}
+
+  if [ "$DOCKER4" -eq "$UNIQUE4" ]; then
+    logsuccess "✅ IPv4 perfect sync: $UNIQUE4 == $DOCKER4"
+  elif [ "$DIFF4ABS" -le 5 ]; then
+    loginfo "ℹ️ IPv4 minor difference (±$DIFF4ABS) - normal due to nftables auto-merge"
+  else
+    logwarn "⚠️ IPv4 significant difference: unique_jails=$UNIQUE4, docker-block=$DOCKER4"
+  fi
+
+  if [ "$DOCKER6" -eq "$UNIQUE6" ]; then
+    logsuccess "✅ IPv6 perfect sync: $UNIQUE6 == $DOCKER6"
+  elif [ "$DIFF6ABS" -le 5 ]; then
+    loginfo "ℹ️ IPv6 minor difference (±$DIFF6ABS) - normal due to nftables auto-merge"
+  else
+    logwarn "⚠️ IPv6 significant difference: unique_jails=$UNIQUE6, docker-block=$DOCKER6"
+  fi
+
+  echo ""
+  logsuccess "Validation sync completed. Hook handles immediate bans."
+}
+
+
+################################################################################
 # F2B DOCKER DASHBOARD (NEW v0.23)
 ################################################################################
 
@@ -1353,38 +1535,48 @@ f2b_docker_dashboard() {
 }
 
 f2b_docker_commands() {
-    case "$2" in
-        dashboard)
-            f2b_docker_dashboard
-            ;;
-        info)
-            f2b_docker_info
-            ;;
-        sync)
-            f2b_sync_docker
-            ;;
-        verify)
-            f2b_docker_verify
-            ;;
-        *)
-            cat <<EOF
-            
+  case "${2}" in
+    dashboard)
+      f2b_docker_dashboard
+      ;;
+    info)
+      f2b_docker_info
+      ;;
+    sync)
+      case "${3:-validate}" in
+        full)
+          f2b_sync_docker_full
+          ;;
+        validate|*)
+          f2b_sync_docker
+          ;;
+      esac
+      ;;
+    verify)
+      f2b_docker_verify
+      ;;
+    *)
+      cat << 'EOF'
 Usage: f2b docker COMMAND
 
 COMMANDS:
-  dashboard     Real-time monitoring dashboard
-  info          Show docker-block configuration
-  sync          Synchronize fail2ban ↔ docker-block
-  verify      Deep verify of F2B ↔ docker-block sync (IPv4 union)
+  dashboard              Real-time monitoring dashboard
+  info                   Show docker-block configuration
+  sync [full|validate]   Synchronize fail2ban ↔ docker-block
+                         - full:     Heavy bidirectional sync (ADD+REMOVE)
+                         - validate: Light consistency check (REMOVE only)
+                         - default:  validate
+  verify                 Deep verify of F2B ↔ docker-block sync (IPv4 union)
 
 Examples:
   sudo f2b docker dashboard
-  sudo f2b docker info
-  sudo f2b docker sync
+  sudo f2b docker sync                    # Default: validate
+  sudo f2b docker sync validate           # Explicit validate mode
+  sudo f2b docker sync full               # Full reconciliation
   sudo f2b docker verify
 EOF
-            ;;
-    esac
+      ;;
+  esac
 }
 
 ################################################################################
@@ -1511,29 +1703,36 @@ manage_list_blocked_ports() {
 }
 
 manage_manual_ban() {
-    local ip
-    ip="$1"
-    local timeout
-    timeout="${2:-7d}"
+  local ip="$1"
+  local timeout="${2:-7d}"
 
-    if [ -z "$ip" ]; then
-        log_error "Usage: manage manual-ban <ip> [timeout]"
-        return 1
-    fi
+  if [ -z "$ip" ]; then
+    logerror "Usage: manage manual-ban IP [timeout]"
+    return 1
+  fi
 
-    if ! validate_ip "$ip"; then
-        return 1
-    fi
+  # Validácia IP (wrapper už má validate_ip())
+  if ! validate_ip "$ip"; then
+    return 1
+  fi
 
-    log_header "Banning $ip ($timeout)"
+  logheader "Banning $ip ($timeout)"
 
-    if sudo nft add element "$F2BTABLE" f2b-manualblock "{ $ip timeout $timeout }" 2>/dev/null; then
-        log_success "Banned"
-    else
-        log_warn "Already banned"
-    fi
+  # 1) Fail2Ban jail: manualblock
+  if sudo fail2ban-client set manualblock banip "$ip" >/dev/null 2>&1; then
+    logsuccess "Fail2Ban: added to jail 'manualblock'"
+  else
+    logwarn "Fail2Ban: failed to add IP to jail 'manualblock' (maybe already banned?)"
+  fi
 
-    echo ""
+  # 2) nftables set: f2b-manualblock
+  if sudo nft add element inet fail2ban-filter f2b-manualblock "{ $ip timeout $timeout }" >/dev/null 2>&1; then
+    logsuccess "nftables: added to set f2b-manualblock"
+  else
+    logwarn "nftables: could not add IP to set f2b-manualblock (already present or nft error)"
+  fi
+
+  echo
 }
 
 manage_manual_unban() {
@@ -1541,7 +1740,7 @@ manage_manual_unban() {
     ip="$1"
 
     if [ -z "$ip" ]; then
-        log_error "Usage: manage manual-unban <ip>"
+        logerror "Usage: manage manual-unban IP"
         return 1
     fi
 
@@ -1549,16 +1748,41 @@ manage_manual_unban() {
         return 1
     fi
 
-    log_header "Unbanning $ip"
+    logheader "Unbanning $ip"
 
-    if sudo nft delete element "$F2BTABLE" f2b-manualblock "{ $ip }" 2>/dev/null; then
-        log_success "Unbanned"
+    local changed=0
+
+    # 1) Fail2Ban jail manualblock
+    if sudo fail2ban-client status manualblock 2>/dev/null | grep -Fq "$ip"; then
+        if sudo fail2ban-client set manualblock unbanip "$ip" >/dev/null 2>&1; then
+            logsuccess "Fail2Ban: removed from jail 'manualblock'"
+            changed=1
+        else
+            logwarn "Fail2Ban: failed to unban IP from jail 'manualblock'"
+        fi
     else
-        log_error "Not found"
+        loginfo "Fail2Ban: IP not present in jail 'manualblock'"
     fi
 
-    echo ""
+    # 2) nftables set f2b-manualblock
+    if sudo nft list set inet fail2ban-filter f2b-manualblock 2>/dev/null | grep -Fq "$ip"; then
+        if sudo nft delete element inet fail2ban-filter f2b-manualblock "{ $ip }" >/dev/null 2>&1; then
+            logsuccess "nftables: removed from set f2b-manualblock"
+            changed=1
+        else
+            logwarn "nftables: failed to remove IP from set f2b-manualblock"
+        fi
+    else
+        loginfo "nftables: IP not present in set f2b-manualblock"
+    fi
+
+    if [ "$changed" -eq 0 ]; then
+        logwarn "IP $ip not found in manualblock (Fail2Ban ani nftables)"
+    fi
+
+    echo
 }
+
 
 manage_unban_all() {
     local ip
@@ -2903,7 +3127,9 @@ DOCKER:
   docker COMMAND              Docker only related commands
   docker dashboard            Real-time monitoring dashboard
   docker info                 Show docker-block configuration
-  docker sync                 Synchronize fail2ban ↔ docker-block
+  docker sync                    # Default: validate
+  docker sync validate           # Explicit validate mode
+  docker sync full               # Full reconciliation
   docker verify               Deep verify of F2B ↔ docker-block sync (IPv4 union)
 
 MANAGE - PORT BLOCKING:
@@ -2997,7 +3223,7 @@ main() {
                 enhanced) f2b_sync_enhanced ;;
                 force)    f2b_sync_force ;;
                 silent)   sync_silent ;;
-                docker)   f2b_sync_docker ;;
+                docker)   f2b_sync_docker_full ;;
                 *)        show_help ;;
             esac
             ;;

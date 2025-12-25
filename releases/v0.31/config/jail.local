@@ -1,0 +1,207 @@
+# Fail2Ban Hybrid Manager v0.31
+# Custom Configuration: jail.local
+# Date: 2025-12-26
+# 11 jails, nftables actions, recidive 30d
+# Managed by: INSTALL-ALL-v031 bundle
+# Docker-block immediate ban
+
+[DEFAULT]
+# Email settings
+destemail = admin@example.com
+sender = fail2ban@example.com
+sendername = Fail2Ban Notifications
+
+# Whitelist
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16 188.121.168.64
+
+# Global defaults
+findtime = 600
+bantime = 3600
+maxretry = 5
+backend = auto
+
+[DEFAULT]
+banaction = nftables-multiport
+banaction_allports = nftables-allports
+
+action = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
+         docker-sync-hook
+
+action_mwl = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
+             docker-sync-hook
+             sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", protocol="%(protocol)s", chain="%(chain)s"]
+
+################################################################################
+# SSH JAILS (mimo Docker — bez docker-sync-hook)
+################################################################################
+
+[sshd]
+enabled = true
+port = 2222
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 2
+findtime = 3600
+bantime = 86400
+bantime.increment = true
+bantime.factor = 3
+bantime.maxtime = 604800
+# SSH goes ONLY to nftables, NO docker-sync-hook
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+
+[sshd-slowattack]
+enabled = true
+port = 2222
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+findtime = 2d
+bantime = 7d
+bantime.increment = true
+bantime.factor = 3
+bantime.maxtime = 30d
+# SSH goes ONLY to nftables, NO docker-sync-hook
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+################################################################################
+# RECIDIVE & MANUAL BLOCK
+################################################################################
+
+
+[recidive]
+enabled  = true
+logpath  = /var/log/fail2ban.log
+backend  = polling
+filter   = recidive
+
+findtime = 30d
+bantime  = 30d
+maxretry = 4
+
+banaction = nftables-recidive
+unbanaction = nftables-recidive[actiontype=unban] 
+action = %(action_mwl)s
+
+[manualblock]
+enabled  = true
+logpath  = /var/log/fail2ban-blocked-ips.txt
+filter   = manualblock
+maxretry = 1
+bantime  = 1y
+
+banaction = nftables-allports
+action = %(action_mwl)s
+
+################################################################################
+# NPM JAILS (s docker-sync-hook na okamžitú synchronizáciu)
+################################################################################
+
+[f2b-exploit-critical]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 1
+findtime = 600
+bantime  = 31536000
+filter   = f2b-exploit-critical
+
+action   = %(action_mwl)s
+
+[f2b-dos-high]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 1
+findtime = 600
+bantime  = 604800
+filter   = f2b-dos-high
+
+# základná akcia = ban + docker-sync-hook
+# mail len start/stop (actionban/unban vypnuté)
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+[f2b-web-medium]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 6
+findtime = 600
+bantime  = 1800
+bantime.increment = true
+bantime.maxtime   = 604800
+filter   = f2b-web-medium
+
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+[nginx-recon-bonus]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 3
+findtime = 600
+bantime  = 1h
+bantime.increment = true
+bantime.factor    = 24
+bantime.maxtime   = 7d
+filter   = nginx-recon-optimized
+
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+[f2b-fuzzing-payloads]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 2
+findtime = 600
+bantime  = 1800
+bantime.increment = true
+bantime.maxtime   = 86400
+filter   = f2b-fuzzing-payloads
+
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+[f2b-botnet-signatures]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 1
+findtime = 600
+bantime  = 86400
+filter   = f2b-botnet-signatures
+
+action = %(action_)s
+         mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
+
+[f2b-anomaly-detection]
+enabled  = true
+port     = http,https
+logpath  = /opt/rustnpm/data/logs/fallback_access.log
+           /opt/rustnpm/data/logs/proxy-host-*_access.log
+backend  = polling
+maxretry = 3
+findtime = 600
+bantime  = 900
+bantime.increment = true
+bantime.maxtime   = 3600
+filter   = f2b-anomaly-detection
+
+action = %(action_mwl)s
