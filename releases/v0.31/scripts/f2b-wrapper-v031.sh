@@ -3121,7 +3121,7 @@ SYNC:
   sync enhanced               Enhanced bidirectional sync
   sync force                  Force sync + verify
   sync silent                 Silent sync (for cron)
-  sync docker                 Docker-block sync
+  sync docker                 Docker-block sync full # Full reconciliation
 
 DOCKER:
   docker COMMAND              Docker only related commands

@@ -20,19 +20,18 @@ bantime = 3600
 maxretry = 5
 backend = auto
 
-[DEFAULT]
 banaction = nftables-multiport
 banaction_allports = nftables-allports
 
-action = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
-         docker-sync-hook
+action_ = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
+          docker-sync-hook
 
 action_mwl = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
              docker-sync-hook
              sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", protocol="%(protocol)s", chain="%(chain)s"]
 
 ################################################################################
-# SSH JAILS (mimo Docker — bez docker-sync-hook)
+# SSH JAILS (nftables + docker-sync-hook)
 ################################################################################
 
 [sshd]
@@ -49,7 +48,6 @@ bantime.maxtime = 604800
 # SSH goes ONLY to nftables, NO docker-sync-hook
 action = %(action_)s
          mail[name=%(__name__)s, dest="%(destemail)s", sender="%(sender)s", actionban="", actionunban=""]
-
 
 [sshd-slowattack]
 enabled = true

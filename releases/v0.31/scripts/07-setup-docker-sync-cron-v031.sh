@@ -86,35 +86,36 @@ echo ""
 info "Installing cron job for docker-block sync..."
 echo ""
 
-CRON_LINE="*/1 * * * * flock -n /run/f2b-docker-validate.lock /usr/local/bin/f2b docker sync validate 2>&1 | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' | logger -t f2b-docker-validate"
+CRON_LINE_VALIDATE="*/1 * * * * flock -n /run/f2b-docker-validate.lock /usr/local/bin/f2b docker sync validate 2>&1 | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' | logger -t f2b-docker-validate"
+CRON_LINE_FULL="*/15 * * * * flock -n /run/f2b-docker-full.lock /usr/local/bin/f2b docker sync full 2>&1 | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' | logger -t f2b-docker-full"
 
-# Check if cron job already exists
-if sudo crontab -l 2>/dev/null | grep -q "f2b sync docker"; then
-    warning "Cron job already exists - checking if correct..."
-    
-    EXISTING=$(sudo crontab -l 2>/dev/null | grep "f2b sync docker")
-    
-    if [ "$EXISTING" = "$CRON_LINE" ]; then
-        log "Cron job is correct and active ✅"
+# Check if cron jobs already exist
+if sudo crontab -l 2>/dev/null | grep -q "f2b docker sync"; then
+    warning "Cron jobs already exist - checking if correct..."
+
+    EXISTING_VALIDATE=$(sudo crontab -l 2>/dev/null | grep "f2b docker sync validate" || true)
+    EXISTING_FULL=$(sudo crontab -l 2>/dev/null | grep "f2b docker sync full" || true)
+
+    echo " Current validate: $EXISTING_VALIDATE"
+    echo " Expected validate: $CRON_LINE_VALIDATE"
+    echo ""
+    echo " Current full:     $EXISTING_FULL"
+    echo " Expected full:    $CRON_LINE_FULL"
+    echo ""
+
+    read -p "Update cron jobs? (yes/no): " -r
+    if [[ $REPLY =~ ^[Yy]es$ ]]; then
+        # Remove old and add new
+        sudo crontab -l 2>/dev/null | grep -v "f2b docker sync" | sudo crontab -
+        (sudo crontab -l 2>/dev/null; echo "$CRON_LINE_VALIDATE"; echo "$CRON_LINE_FULL") | sudo crontab -
+        log "Cron jobs updated ✅"
     else
-        warning "Existing cron job differs:"
-        echo "   Current: $EXISTING"
-        echo "   Expected: $CRON_LINE"
-        echo ""
-        read -p "Update cron job? (yes/no): " -r
-        if [[ $REPLY =~ ^[Yy]es$ ]]; then
-            # Remove old and add new
-            sudo crontab -l 2>/dev/null | grep -v "f2b sync docker" | sudo crontab -
-            (sudo crontab -l 2>/dev/null; echo "$CRON_LINE") | sudo crontab -
-            log "Cron job updated ✅"
-        else
-            info "Keeping existing cron job"
-        fi
+        info "Keeping existing cron jobs"
     fi
 else
-    # Add new cron job
-    (sudo crontab -l 2>/dev/null; echo "$CRON_LINE") | sudo crontab -
-    log "Cron job added: every 1 minute ✅"
+    # Add new cron jobs
+    (sudo crontab -l 2>/dev/null; echo "$CRON_LINE_VALIDATE"; echo "$CRON_LINE_FULL") | sudo crontab -
+    log "Cron jobs added: validate every 1 minute, full every 15 minutes ✅"
 fi
 
 echo ""
@@ -181,9 +182,9 @@ echo ""
 info "Verification:"
 echo ""
 
-# Show cron job
-echo "Installed cron job:"
-sudo crontab -l 2>/dev/null | grep "f2b sync docker" | sed 's/^/  /'
+# Show cron jobs
+echo "Installed cron jobs:"
+sudo crontab -l 2>/dev/null | grep "f2b docker sync" | sed 's/^/  /'
 echo ""
 
 # Check log file
@@ -201,7 +202,7 @@ echo ""
 ################################################################################
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║          ✅ Docker-Block Auto-Sync Configured!                ║"
+echo "║          ✅ Docker-Block Auto-Sync Configured!                 ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -213,8 +214,9 @@ info "What happens now?"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "Every minute, the system will:"
-echo "  1. Sync fail2ban banned IPs → docker-block"
-echo "  2. Remove expired IPs from docker-block"
+echo "  1. Run validate sync (REMOVE-only) for docker-block"
+echo "Every 15 minutes, the system will:"
+echo "  2. Run full sync (ADD+REMOVE) for docker-block"
 echo "  3. Log all changes to $LOG_FILE"
 echo ""
 
@@ -229,13 +231,13 @@ echo "2. Real-time dashboard (live monitoring):"
 echo "   sudo f2b docker dashboard"
 echo ""
 echo "3. Manual sync (if needed):"
-echo "   sudo f2b sync docker"
+echo "   sudo f2b docker sync full"
 echo ""
 echo "4. Check docker-block status:"
 echo "   sudo f2b docker info"
 echo ""
-echo "5. Verify cron job:"
-echo "   sudo crontab -l | grep docker-sync"
+echo "5. Verify cron jobs:"
+echo "   sudo crontab -l | grep 'f2b docker sync'"
 echo ""
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -243,4 +245,3 @@ echo ""
 
 log "Setup complete - docker-block auto-sync is now active! 🚀"
 echo ""
-
