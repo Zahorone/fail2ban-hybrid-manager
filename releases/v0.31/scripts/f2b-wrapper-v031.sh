@@ -47,7 +47,7 @@ set -o pipefail
 # shellcheck disable=SC2034
 RELEASE="v0.31"
 # shellcheck disable=SC2034
-VERSION="0.32"
+VERSION="0.33"
 # shellcheck disable=SC2034
 BUILD_DATE="2025-12-20"
 # shellcheck disable=SC2034
@@ -1416,18 +1416,40 @@ f2b_docker_dashboard() {
       log_success "Table ACTIVE"
 
       local ipv4count ipv6count blockedports
-      ipv4count=$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-        | grep -oE '^[[:space:]]*[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-        | wc -l | tr -d ' ')
-      ipv6count=$(sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
-        | grep -oE '[0-9a-fA-F: ]+' \
-        | grep -F ':' \
-        | wc -l | tr -d ' ')
+      if jq_check_installed; then
+        ipv4count=$(
+          sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
+            | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null \
+            | head -1
+        )
+        ipv6count=$(
+          sudo nft -j list set inet docker-block docker-banned-ipv6 2>/dev/null \
+            | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null \
+            | head -1
+        )
+      else
+        ipv4count=$(
+          sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | wc -l | tr -d '[:space:]'
+        )
+        ipv6count=$(
+          sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
+            | grep -oE '([0-9a-fA-F:]+)' \
+            | grep -F ':' \
+            | wc -l | tr -d '[:space:]'
+        )
+      fi
 
-      blockedports=$(sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null \
-        | grep -oE '[0-9]+' \
-        | sort -un \
-        | tr '\n' ' ')
+      ipv4count=${ipv4count:-0}
+      ipv6count=${ipv6count:-0}
+
+      blockedports=$(
+        sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null \
+          | grep -oE '[0-9]+' \
+          | sort -un \
+          | tr '\n' ' '
+      )
 
       echo "  IPv4 banned : ${ipv4count} IPs"
       echo "  IPv6 banned : ${ipv6count} IPs"
@@ -1440,34 +1462,45 @@ f2b_docker_dashboard() {
 
     echo
     echo "FAIL2BAN STATUS"
-    local total=0
+
     local active_jails=0
+    local tmp_all total_unique_v4
+    tmp_all=$(mktemp)
+    : > "$tmp_all"
 
     for jail in "${JAILS[@]}"; do
       local count
       count=$(get_f2b_count "${jail}" all | tr -d ' ')
       count=${count:-0}
+
       if [ "${count}" -gt 0 ]; then
-        printf "  %-30s %s IPs\n" "${jail}" "${count}"
+        printf " %-30s %s IPs\n" "${jail}" "${count}"
         active_jails=$((active_jails + 1))
-        total=$((total + count))
+
+        # Spoľahlivý zdroj IP – rovnaké ako sync/verify
+        get_f2b_ips "$jail" 2>/dev/null \
+          | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' \
+          >> "$tmp_all"
       fi
     done
 
     if [ "${active_jails}" -eq 0 ]; then
       log_success "All jails clean"
+      total_unique_v4=0
     else
+      total_unique_v4=$(sort -u "$tmp_all" | wc -l | tr -d ' ')
       echo
       echo "  Active jails : ${active_jails}"
-      echo "  Total IPs    : ${total}"
+      echo "  Total IPs    : ${total_unique_v4} (unique IPv4)"
     fi
+
+    rm -f "$tmp_all"
 
     echo
     echo "RECENT ATTACKS (last hour)"
     if [ -f /var/log/fail2ban.log ]; then
       local lasthour since1
       since1="$(date --date='1 hour ago' '+%Y-%m-%d %H:%M:%S')"
-
       lasthour=$(
         zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
           | awk -v since="$since1" '
@@ -1475,7 +1508,6 @@ f2b_docker_dashboard() {
               END { print c+0 }
             '
       )
-
       lasthour=${lasthour:-0}
       echo "  Ban/Found events: ${lasthour}"
     else
@@ -1487,7 +1519,7 @@ f2b_docker_dashboard() {
     if [ -f /var/log/fail2ban.log ]; then
       if ! grep -h "Ban" /var/log/fail2ban.log 2>/dev/null \
           | tail -500 \
-          | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' \
+          | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
           | sort | uniq -c | sort -rn | head -5; then
         echo "  No attack data available"
       fi
@@ -1497,32 +1529,55 @@ f2b_docker_dashboard() {
 
     echo
     echo "SYNC STATUS"
+
     if sudo nft list table inet docker-block >/dev/null 2>&1; then
-      local f2btotal=0
+      local tmpfile f2b_unique ipv4count2 diff diff_abs
+      tmpfile=$(mktemp)
+      : > "$tmpfile"
+
+      # F2B union unikátnych IPv4 naprieč všetkými jailmi (rovnako ako sync)
       for jail in "${JAILS[@]}"; do
-        local c
-        c=$(get_f2b_count "${jail}" all | tr -d ' ')
-        c=${c:-0}
-        f2btotal=$((f2btotal + c))
+        get_f2b_ips "$jail" 2>/dev/null \
+          | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' \
+          >> "$tmpfile"
       done
+      f2b_unique=$(sort -u "$tmpfile" | wc -l | tr -d ' ')
+      rm -f "$tmpfile"
 
-      local ipv4count
-      ipv4count=$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-        | grep -oE '^[[:space:]]*[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-        | wc -l | tr -d ' ')
-
-      if [ "${f2btotal}" -eq "${ipv4count}" ]; then
-        log_success "Fail2Ban ↔ docker-block SYNCED (${f2btotal} IPv4)"
+      if jq_check_installed; then
+        ipv4count2=$(
+          sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
+            | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null \
+            | head -1
+        )
       else
-        local diff=$((f2btotal - ipv4count))
-        log_warn "Fail2Ban=${f2btotal}, docker-block=${ipv4count}, DIFF=${diff}"
+        ipv4count2=$(
+          sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | wc -l | tr -d '[:space:]'
+        )
+      fi
+      ipv4count2=${ipv4count2:-0}
+
+      diff=$((f2b_unique - ipv4count2))
+      diff_abs=${diff#-}
+
+      echo "  F2B unique IPv4 : ${f2b_unique}"
+      echo "  docker-block IPv4: ${ipv4count2}"
+
+      if [ "$f2b_unique" -eq "$ipv4count2" ]; then
+        log_success "Fail2Ban ↔ docker-block PERFECT SYNC"
+      elif [ "$diff_abs" -le 5 ]; then
+        log_success "Minor diff (±5) due to nftables auto-merge (DIFF=${diff})"
+      else
+        log_warn "Significant DIFF=${diff} – run: sudo f2b docker verify"
       fi
     else
       log_warn "docker-block table not configured"
     fi
 
     echo
-    if sudo crontab -l 2>/dev/null | grep -q "f2b-docker-sync"; then
+    if sudo crontab -l 2>/dev/null | grep -q "/usr/local/bin/f2b docker sync"; then
       log_success "Auto-sync ACTIVE (cron)"
     else
       log_error "Auto-sync NOT CONFIGURED"
