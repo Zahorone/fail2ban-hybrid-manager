@@ -2071,26 +2071,38 @@ analyze_npm_http_status() {
     log_header "NPM HTTP Status Analysis"
     echo ""
 
-    local ACCESS_LOGS="$NPM_LOG_DIR/*_access.log"
-
     if ! sudo test -f "$NPM_LOG_DIR/proxy-host-1_access.log"; then
         log_warn "No NPM logs found at $NPM_LOG_DIR"
         return 1
     fi
 
-    local RECENT_LOGS
-    RECENT_LOGS=$(sudo tail -5000 $ACCESS_LOGS 2>/dev/null)
+    local ACCESS_LOGS=( "$NPM_LOG_DIR"/*_access.log )
 
-    # Count status codes
+    if [ ! -e "${ACCESS_LOGS[0]}" ]; then
+        log_warn "No access logs matched: $NPM_LOG_DIR/*_access.log"
+        return 1
+    fi
+
+    local _RECENT_LOGS
+    _RECENT_LOGS=$(sudo cat "${ACCESS_LOGS[@]}" 2>/dev/null | tail -5000)
+
+    if [ -z "$_RECENT_LOGS" ]; then
+        log_warn "No log lines available for analysis"
+        return 0
+    fi
+
     local STATUS_400 STATUS_403 STATUS_404 STATUS_444 STATUS_499 STATUS_500
-    STATUS_400=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 400 ' 2>/dev/null)")
-    STATUS_403=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 403 ' 2>/dev/null)")
-    STATUS_404=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 404 ' 2>/dev/null)")
-    STATUS_444=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 444 ' 2>/dev/null)")
-    STATUS_499=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 499 ' 2>/dev/null)")
-    STATUS_500=$(clean_number "$(echo "$RECENT_LOGS" | grep -c ' 500 ' 2>/dev/null)")
+    STATUS_400=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 400 ' 2>/dev/null)")
+    STATUS_403=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 403 ' 2>/dev/null)")
+    STATUS_404=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 404 ' 2>/dev/null)")
+    STATUS_444=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 444 ' 2>/dev/null)")
+    STATUS_499=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 499 ' 2>/dev/null)")
+    STATUS_500=$(clean_number "$(echo "$_RECENT_LOGS" | grep -c ' 500 ' 2>/dev/null)")
 
     local TOTAL_ERRORS=$((STATUS_400 + STATUS_403 + STATUS_404 + STATUS_444 + STATUS_499 + STATUS_500))
+
+    local TOTAL_REQUESTS
+    TOTAL_REQUESTS=$(echo "$_RECENT_LOGS" | wc -l | tr -d ' ')
 
     echo " 400 Bad Request:       $STATUS_400 (malformed requests)"
     echo " 403 Forbidden:         $STATUS_403 (blocked by rules)"
@@ -2099,10 +2111,9 @@ analyze_npm_http_status() {
     echo " 499 Client Closed:     $STATUS_499 (timeout)"
     echo " 500 Internal Error:    $STATUS_500"
     echo " ────────────────────────"
-    echo " Total Error Responses: $TOTAL_ERRORS / 5000 requests"
+    echo " Total Error Responses: $TOTAL_ERRORS / $TOTAL_REQUESTS requests"
     echo ""
 
-    # Threat level assessment
     if [ "$TOTAL_ERRORS" -gt 1000 ]; then
         log_alert "HIGH ERROR RATE - Active attack in progress!"
     elif [ "$TOTAL_ERRORS" -gt 200 ]; then
@@ -2113,10 +2124,18 @@ analyze_npm_http_status() {
 
     echo ""
 
-    # Export metadata for summary
+    # Globálna premenná pre analyze_probed_paths() v tom istom behu (bez exportu!)
+    RECENT_LOGS="$_RECENT_LOGS"
+
+    # Export len malé metriky (OK)
     export NPM_TOTAL_ERRORS="$TOTAL_ERRORS"
+    export NPM_TOTAL_REQUESTS="$TOTAL_REQUESTS"
+    export NPM_STATUS_400="$STATUS_400"
+    export NPM_STATUS_403="$STATUS_403"
     export NPM_STATUS_404="$STATUS_404"
-    export RECENT_LOGS
+    export NPM_STATUS_444="$STATUS_444"
+    export NPM_STATUS_499="$STATUS_499"
+    export NPM_STATUS_500="$STATUS_500"
 }
 
 analyze_npm_attack_patterns() {
@@ -2133,12 +2152,13 @@ analyze_npm_attack_patterns() {
 
     # Detect attack patterns
     local SQL_INJ PATH_TRAV PHP_EXPLOIT SHELL_RCE SCANNER GIT_EXPOSE
-    SQL_INJ=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'union.*select|sqlmap|'\'' and|'\'' or|benchmark' 2>/dev/null)")
-    PATH_TRAV=$(clean_number "$(echo "$ALL_LOGS" | grep -Ec '\.\./|\.\\.\\\\' 2>/dev/null)")
-    PHP_EXPLOIT=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'wp-admin|phpMyAdmin|admin\.php' 2>/dev/null)")
-    SHELL_RCE=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'cmd=|exec=|/bin/bash|/bin/sh' 2>/dev/null)")
-    SCANNER=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'nikto|nmap|masscan|sqlmap' 2>/dev/null)")
-    GIT_EXPOSE=$(clean_number "$(echo "$ALL_LOGS" | grep -Ec '\.git/|\.env|\.config' 2>/dev/null)")
+    # Pozn.: používam [[:space:]] namiesto \s (grep -E). [file:1]
+    SQL_INJ=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'union|select.*from|sqlmap|%27|%3[dD]|drop[[:space:]]+table|sleep\(|benchmark' 2>/dev/null)")
+    PATH_TRAV=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc '\.\./|\.\.\\|%2e%2e|\.\.%2[fF]|%5[cC]|%2fetc|etc/passwd' 2>/dev/null)")
+    PHP_EXPLOIT=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'wp-login|wp-admin|xmlrpc|phpmyadmin|shell\.php|upload\.php|/admin/' 2>/dev/null)")
+    SHELL_RCE=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'wget|curl|bash -i|nc -|/dev/tcp|`.*`|\$\([^)]*\)' 2>/dev/null)")
+    SCANNER=$(clean_number "$(echo "$ALL_LOGS" | grep -iEc 'nikto|nmap|masscan|nessus|sqlmap|dirbuster|burp|zap|metasploit' 2>/dev/null)")
+    GIT_EXPOSE=$(clean_number "$(echo "$ALL_LOGS" | grep -Ec '\.git/|\.git$|\.env|\.config|\.htaccess|\.htpasswd|web\.config' 2>/dev/null)")
 
     echo " SQL Injection:         $SQL_INJ attempts"
     echo " Path Traversal:        $PATH_TRAV attempts"
@@ -2159,10 +2179,134 @@ analyze_probed_paths() {
     log_header "Top 10 Most Probed Paths (404)"
     echo ""
 
-    if [ -n "$RECENT_LOGS" ] && [ "${NPM_STATUS_404:-0}" -gt 0 ]; then
-        echo "$RECENT_LOGS" | grep ' 404 ' | awk '{print $7}' \
-            | sort | uniq -c | sort -rn | head -10 \
-            | awk '{printf "  %5d x %s\n", $1, $2}'
+    if [ -z "$RECENT_LOGS" ]; then
+        echo "  None"
+        echo ""
+        return 0
+    fi
+
+    echo "$RECENT_LOGS" \
+        | awk '($4==404 || $5==404)' \
+        | awk -F\" 'NF>=2 {print $2}' \
+        | sort | uniq -c | sort -rn | head -10 \
+        | awk '{printf "  %5d x %s\n", $1, $2}'
+
+    echo ""
+}
+
+# Pomocná: vráti 1 ak je line 404 alebo 444 (tvoj log má status v $4 alebo $5)
+_is_404_or_444_line() {
+    awk '($4==404 || $5==404 || $4==444 || $5==444){exit 0} {exit 1}'
+}
+
+analyze_top_source_ips_444() {
+    log_header "Top 10 Source IPs (444, recent logs)"
+    echo ""
+
+    if [ -z "$RECENT_LOGS" ]; then
+        echo "  None (no RECENT_LOGS)"
+        echo ""
+        return 0
+    fi
+
+    local out
+      out=$(
+      echo "$RECENT_LOGS" \
+        | awk '($4==444 || $5==444)' \
+        | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
+        | sed 's/^\[Client //; s/\]$//' \
+        | sort | uniq -c | sort -rn | head -10 \
+        | awk '{printf "  %5d x %s\n", $1, $2}'
+    )
+
+
+    if [ -n "$out" ]; then
+        echo "$out"
+    else
+        echo "  None"
+    fi
+
+    echo ""
+}
+
+analyze_top_user_agents_444() {
+    log_header "Top 10 User-Agents (444 only, recent logs)"
+    echo ""
+
+    if [ -z "$RECENT_LOGS" ]; then
+        echo "  None (no RECENT_LOGS)"
+        echo ""
+        return 0
+    fi
+
+    # UA je u teba zvyčajne quoted segment tesne pred posledným quoted "-"
+    # Príklad: ...] "cypex.ai/scanning Mozilla/5.0 ... Safari/537.36" "-"
+    local out
+    out=$(echo "$RECENT_LOGS" \
+        | awk '($4==444 || $5==444)' \
+        | awk -F\" 'NF>=4 {print $(NF-3)}' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | grep -vE '^(|-)$' \
+        | awk '{ if (length($0)>120) print substr($0,1,120) "..."; else print }' \
+        | sort | uniq -c | sort -rn | head -10 \
+        | awk '{printf "  %5d x %s\n", $1, substr($0, index($0,$2))}'
+    )
+
+    if [ -n "$out" ]; then
+        echo "$out"
+    else
+        echo "  None"
+    fi
+
+    echo ""
+}
+
+analyze_top_source_ips_404() {
+    log_header "Top 10 Source IPs (404, recent logs)"
+    echo ""
+
+    if [ -z "$RECENT_LOGS" ]; then
+        echo "  None (no RECENT_LOGS)"
+        echo ""
+        return 0
+    fi
+
+    out=$(
+      echo "$RECENT_LOGS" \
+        | awk '($4==404 || $5==404)' \
+        | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
+        | sed 's/^\[Client //; s/\]$//' \
+        | sort | uniq -c | sort -rn | head -10 \
+        | awk '{printf "  %5d x %s\n", $1, $2}'
+    )
+
+    [ -n "$out" ] && echo "$out" || echo "  None"
+    echo ""
+}
+
+analyze_top_user_agents_suspicious() {
+    log_header "Top 10 Scanners by User-Agent (404/444, recent logs)"
+    echo ""
+
+    if [ -z "$RECENT_LOGS" ]; then
+        echo "  None (no RECENT_LOGS)"
+        echo ""
+        return 0
+    fi
+
+    local out
+    out=$(echo "$RECENT_LOGS" \
+        | awk '($4==404 || $5==404 || $4==444 || $5==444)' \
+        | awk -F\" 'NF>=4 {print $(NF-3)}' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | grep -vE '^(|-)$' \
+        | awk '{ if (length($0)>120) print substr($0,1,120) "..."; else print }' \
+        | sort | uniq -c | sort -rn | head -10 \
+        | awk '{printf "  %5d x %s\n", $1, substr($0, index($0,$2))}'
+    )
+
+    if [ -n "$out" ]; then
+        echo "$out"
     else
         echo "  None"
     fi
@@ -2554,6 +2698,10 @@ report_attack_analysis() {
         # Save NPM count to temp file
         echo "NPM_ATTACKS=${TOTAL_NPM_ATTACKS:-0}" >> "$TEMP_DATA"
         analyze_probed_paths
+        analyze_top_user_agents_suspicious
+        analyze_top_source_ips_404
+        analyze_top_source_ips_444
+        analyze_top_user_agents_444
     fi
 
     # SSH Analysis
