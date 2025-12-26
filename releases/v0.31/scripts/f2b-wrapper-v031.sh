@@ -3020,134 +3020,121 @@ report_attack_analysis() {
 ################################################################################
 
 report_attack_timeline() {
-    log_header "╔════════════════════════════════════════════════════════════╗"
-    log_header "║              ATTACK WAVE TIMELINE (Last 24h)               ║"
-    log_header "╚════════════════════════════════════════════════════════════╝"
-    echo ""
+  log_header "╔════════════════════════════════════════════════════════════╗"
+  log_header "║              ATTACK WAVE TIMELINE (Last 24h)               ║"
+  log_header "╚════════════════════════════════════════════════════════════╝"
+  echo
 
-    if [ ! -f /var/log/fail2ban.log ]; then
-        log_warn "Fail2Ban log not found"
-        return 1
+  if [ ! -f /var/log/fail2ban.log ]; then
+    log_warn "Fail2Ban log not found"
+    return 1
+  fi
+    echo "Metric: fail2ban.log events matching: BanFound OR ' Found ' OR ' Ban ' (excluding 'Increase Ban')"
+    echo
+  # Konzistentná definícia "attempt" (ako dashboard: Ban/Found events)
+  # - zámerne nepoužívaj len "Ban", lebo to matchne aj "Unban"
+  local EVENT_RE='(BanFound| Found | Ban )'
+
+  local -a hours
+  local -a counts
+  local max_count=0
+  local total_count=0
+
+  local TMP_F2B since24
+  TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
+  since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
+
+  # Vyrež posledných 24h (rotácia-safe)
+  zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
+    | awk -v s="$since24" 'substr($0,1,19) >= s {print}' > "$TMP_F2B"
+
+  # Nazbieraj po hodinách (23h ago .. 0h ago)
+  for i in {23..0}; do
+    local hour_start hour_end count
+    hour_start="$(date -d "$i hours ago" '+%Y-%m-%d %H:00:00')"
+    hour_end="$(date -d "$i hours ago" '+%Y-%m-%d %H:59:59')"
+
+    count="$(
+      awk -v s="$hour_start" -v e="$hour_end" -v re="$EVENT_RE" '
+        substr($0,1,19) >= s &&
+        substr($0,1,19) <= e &&
+        $0 ~ re &&
+        $0 !~ /Increase Ban/ { c++ }
+        END { print c+0 }
+      ' "$TMP_F2B"
+    )"
+    count="$(clean_number "$count")"
+
+    hours+=( "$(date -d "$i hours ago" '+%H:00')" )
+    counts+=( "$count" )
+
+    total_count=$((total_count + count))
+    [ "$count" -gt "$max_count" ] && max_count=$count
+  done
+
+  cleanup_tmp "$TMP_F2B"
+
+  local avg_count=$((total_count / 24))
+  local bar_width=30
+
+  # Zobraz "každé 3 hodiny" + navyše posledné 2 hodiny (1 a 0)
+  local display_i=(23 20 17 14 11 8 5 2 1 0)
+
+  for i in "${display_i[@]}"; do
+    local idx=$((23 - i))
+    local hour="${hours[$idx]}"
+    local count="${counts[$idx]}"
+
+    local bar_length=0
+    if [ "$max_count" -gt 0 ]; then
+      bar_length=$((count * bar_width / max_count))
     fi
 
-    # Get hourly attack counts for last 24 hours
-    local current_hour=$(date '+%H')
-    local -a hours
-    local -a counts
-    local max_count=0
-    local total_count=0
-    # Collect data for each hour (going backwards 24 hours)
-    local TMP_F2B since24
-    TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
-    since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
-
-    zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
-      | awk -v s="$since24" 'substr($0,1,19) >= s {print}' > "$TMP_F2B"
-
-    for i in {23..0}; do
-      local hour_start hour_end count
-      hour_start="$(date -d "$i hours ago" '+%Y-%m-%d %H:00:00')"
-      hour_end="$(date -d "$i hours ago" '+%Y-%m-%d %H:59:59')"
-
-      count="$(
-        awk -v s="$hour_start" -v e="$hour_end" '
-          substr($0,1,19) >= s && substr($0,1,19) <= e && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
-          END{print c+0}
-        ' "$TMP_F2B"
-      )"
-      count="$(clean_number "$count")"
-
-      hours+=("$(date -d "$i hours ago" '+%H:00')")
-      counts+=("$count")
-      total_count=$((total_count + count))
-      [ "$count" -gt "$max_count" ] && max_count=$count
+    local bar=""
+    local j
+    for ((j=0; j<bar_width; j++)); do
+      if [ "$j" -lt "$bar_length" ]; then
+        bar+="█"
+      else
+        bar+="░"
+      fi
     done
 
-    cleanup_tmp "$TMP_F2B"
-
-    # Calculate average
-    local avg_count=$((total_count / 24))
-
-    # Display timeline (show every 3 hours to fit screen)
-    local bar_width=30
-    
-    for i in {23..0..3}; do
-        local idx=$((23 - i))
-        local hour="${hours[$idx]}"
-        local count="${counts[$idx]}"
-        
-        # Calculate bar length (scaled to max_count)
-        local bar_length=0
-        if [ "$max_count" -gt 0 ]; then
-            bar_length=$((count * bar_width / max_count))
-        fi
-        
-        # Create bar
-        local bar=""
-        for ((j=0; j<bar_length; j++)); do
-            bar+="█"
-        done
-        for ((j=bar_length; j<bar_width; j++)); do
-            bar+="░"
-        done
-        
-        # Determine severity level and color
-        local level=""
-        local color=""
-        if [ "$count" -gt 200 ]; then
-            level="CRITICAL"
-            color="${RED}"
-        elif [ "$count" -gt 100 ]; then
-            level="HIGH"
-            color="${YELLOW}"
-        elif [ "$count" -gt 50 ]; then
-            level="ELEVATED"
-            color="${CYAN}"
-        elif [ "$count" -gt 0 ]; then
-            level="MODERATE"
-            color="${GREEN}"
-        else
-            level="QUIET"
-            color="${DARK_GRAY}"
-        fi
-        
-        # Print timeline row - ✅ OPRAVENÉ
-        printf "%5s  │ %s  ${color}%4d attempts/h  %-10s${NC}\n" \
-            "$hour" "$bar" "$count" "$level"
-    done
-    
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    printf "Total 24h: ${YELLOW}%d${NC} attempts  |  Average: ${CYAN}%d/h${NC}  |  Peak: ${RED}%d/h${NC}\n" \
-        "$total_count" "$avg_count" "$max_count"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-
-    # Attack intensity assessment
-    if [ "$max_count" -gt 200 ]; then
-        log_alert "⚠️  CRITICAL WAVE - Peak attack intensity detected!"
-        echo ""
-        echo "Recommendations:"
-        echo "  • Monitor in real-time: sudo f2b monitor watch"
-        echo "  • Review attackers: sudo f2b monitor top-attackers"
-        echo "  • Check dashboard: sudo f2b docker dashboard"
-    elif [ "$max_count" -gt 100 ]; then
-        log_warn "⚠️  HIGH ACTIVITY - Significant attack waves detected"
-        echo ""
-        echo "Recommendations:"
-        echo "  • Review: sudo f2b monitor trends"
-        echo "  • Check sync: sudo f2b sync check"
-    elif [ "$total_count" -gt 1000 ]; then
-        log_info "🟡 SUSTAINED ACTIVITY - Continuous attack pattern"
-        echo ""
-        log_success "✅ Defenses are handling the load effectively"
-    else
-        log_success "✅ NORMAL ACTIVITY - Low attack volume"
+    local level="LOW"
+    if [ "$count" -gt 200 ]; then
+      level="CRITICAL"
+    elif [ "$count" -gt 100 ]; then
+      level="HIGH"
+    elif [ "$count" -gt 20 ]; then
+      level="MODERATE"
     fi
-    
-    echo ""
+
+    # Formát ako predtým (hodina | bar | X attempts/h | LEVEL)
+   printf "%s  │ %s  %5s events/h  %-10s\n" "$hour" "$bar" "$count" "$level"
+  done
+
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  printf "Total 24h: %s attempts  |  Average: %s/h  |  Peak: %s/h\n" "$total_count" "$avg_count" "$max_count"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo
+
+  if [ "$max_count" -gt 200 ]; then
+    log_alert "⚠️  CRITICAL WAVE - Peak attack intensity detected!"
+  elif [ "$max_count" -gt 100 ]; then
+    log_warn "HIGH ACTIVITY - Significant attack waves detected"
+  elif [ "$total_count" -gt 1000 ]; then
+    log_info "SUSTAINED ACTIVITY - Continuous attack pattern"
+  else
+    log_success "NORMAL ACTIVITY - Low attack volume"
+  fi
+
+  echo
+  echo "Recommendations:"
+  echo "  • Monitor in real-time: sudo f2b monitor watch"
+  echo "  • Review attackers: sudo f2b monitor top-attackers"
+  echo "  • Check dashboard: sudo f2b docker dashboard"
 }
-
 
 ################################################################################
 # HELP
