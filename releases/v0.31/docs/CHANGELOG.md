@@ -1,6 +1,32 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [v0.31.1] (2025-12-28) - "Idempotent Fix & Sync Order"
+
+[FIX] 🔧 docker-block timeout: 1h → 7d (set default)
+      f2b docker sync full no longer inserts timeout 1h → expires 6d23h... (nft get element OK)
+
+[FIX] 🔧 03-install-docker-block-v031.sh → FULLY IDEMPOTENT
+      - write_if_changed(): file overwritten ONLY on change (cmp)
+      - /etc/nftables.conf: NON-DESTRUCTIVE patch (adds include only)
+      - Runtime: delete table inet docker-block → nft -f (no duplicates)
+      - Auto-repopulation: f2b docker sync full after table reload
+
+[FIX] 🔧 INSTALL-ALL: Swapped order wrapper → docker-block (step 4/5)
+      Wrapper installed FIRST → f2b docker sync full works immediately after docker-block
+
+[ENHANCEMENT] ➕ 03-install-wrapper-v031.sh: --yes / --non-interactive
+               Suppresses all read prompts → fully automated from INSTALL-ALL
+
+[ENHANCEMENT] ➕ INSTALL-ALL-v031.sh: SAFETY NET FALLBACK
+               Step 4: 03-wrapper → fallback 04-wrapper
+               Step 5: 04-docker-block → fallback 03-docker-block
+               Upgrade compatibility without manual renaming
+
+[RENAME] 🔄 Logical script numbering (optional):
+         scripts/04-install-wrapper-v031.sh    → 03-install-wrapper-v031.sh
+         scripts/03-install-docker-block-v031.sh → 04-install-docker-block-v031.sh
+
 ## [0.31] - 2025-12-26
 
 ### 🚀 Wrapper v0.32 + okamžitý Docker-block ban

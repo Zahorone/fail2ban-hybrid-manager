@@ -617,24 +617,30 @@ else
 fi
 echo ""
 
-# Step 4: Installing Docker port blocking v0.4
-step 4 "$TOTALSTEPS" "Installing Docker port blocking v0.4"
+# Step 4: Installing F2B wrapper (install BEFORE docker-block)
+step 4 "$TOTALSTEPS" "Installing F2B wrapper ${RELEASE} (50+ functions)"
 echo ""
-if [ -f "$SCRIPTDIR/scripts/03-install-docker-block-v031.sh" ]; then
-    bash "$SCRIPTDIR/scripts/03-install-docker-block-v031.sh" || warning "Docker blocking had warnings (may be optional)"
+# Preferred: 03-install-wrapper-v031.sh (new numbering + --yes support)
+if [ -f "$SCRIPTDIR/scripts/03-install-wrapper-v031.sh" ]; then
+    bash "$SCRIPTDIR/scripts/03-install-wrapper-v031.sh" --yes || error "Wrapper installation failed"
+# Safety net: old naming (pre-renumber, NO --yes - interactive fallback)
+elif [ -f "$SCRIPTDIR/scripts/04-install-wrapper-v031.sh" ]; then
+    info "Using legacy wrapper installer (interactive prompts expected)"
+    bash "$SCRIPTDIR/scripts/04-install-wrapper-v031.sh" || error "Legacy wrapper installation failed"
 else
-    warning "Docker blocking script not found (skipping)"
+    error "Wrapper installation script not found"
 fi
 echo ""
 
-# Step 5: Installing F2B wrapper v0.30 (50+ functions)
-step 5 "$TOTALSTEPS" "Installing F2B wrapper ${RELEASE} (50+ functions)"
+# Step 5: Installing Docker port blocking v0.4 (after wrapper)
+step 5 "$TOTALSTEPS" "Installing Docker port blocking v0.4"
 echo ""
-
-if [ -f "$SCRIPTDIR/scripts/04-install-wrapper-v031.sh" ]; then
-    bash "$SCRIPTDIR/scripts/04-install-wrapper-v031.sh" || error "Wrapper installation failed"
+if [ -f "$SCRIPTDIR/scripts/04-install-docker-block-v031.sh" ]; then
+    bash "$SCRIPTDIR/scripts/04-install-docker-block-v031.sh" || warning "Docker blocking had warnings"
+elif [ -f "$SCRIPTDIR/scripts/03-install-docker-block-v031.sh" ]; then
+    bash "$SCRIPTDIR/scripts/03-install-docker-block-v031.sh" || warning "Docker blocking had warnings"
 else
-    error "Wrapper installation script not found (scripts/04-install-wrapper-v031.sh)"
+    warning "Docker blocking script not found (skipping)"
 fi
 echo ""
 

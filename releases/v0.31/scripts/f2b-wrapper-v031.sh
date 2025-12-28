@@ -353,6 +353,83 @@ count_ips() {
   fi
 }
 
+# F2B ALERT NOW – rýchly status za posledných N minút (default 5)
+f2b_alert_now() {
+    local minutes="${1:-5}"
+    local log="/var/log/fail2ban.log"
+
+    if [ ! -f "$log" ]; then
+        logerror "Fail2Ban log not found: $log"
+        return 1
+    fi
+
+    log_header "F2B ALERT NOW (last ${minutes} minutes)"
+
+    # časový prah
+    local since
+    since=$(date -d "-${minutes} min" +"%Y-%m-%d %H:%M:%S")
+
+    local bans_raw attempts_raw
+
+    # reálne nové bany (bez Restore Ban)
+    bans_raw=$(awk -v since="$since" '
+        $1" "$2 >= since && $0 ~ /fail2ban.actions/ && $0 ~ / Ban / && $0 !~ /Restore Ban/ { print }
+    ' "$log")
+
+    # všetky útoky (Found) – vrátane tých, čo neskončia banom
+    attempts_raw=$(awk -v since="$since" '
+        $1" "$2 >= since && $0 ~ /fail2ban.filter/ && $0 ~ / Found / { print }
+    ' "$log")
+
+    # počty
+    local bans_count attempts_count
+    bans_count=$(echo "$bans_raw" | grep -c . 2>/dev/null || true)
+    attempts_count=$(echo "$attempts_raw" | grep -c . 2>/dev/null || true)
+
+    bans_count="$(clean_number "${bans_count:-0}")"
+    attempts_count="$(clean_number "${attempts_count:-0}")"
+
+
+
+    # Level podľa počtu reálnych banov
+    local level="LOW"
+    if   [ "$bans_count" -ge 200 ]; then level="CRITICAL"
+    elif [ "$bans_count" -ge 50  ]; then level="HIGH"
+    elif [ "$bans_count" -ge 10  ]; then level="MODERATE"
+    fi
+
+    # per-jail count
+    local jail_stats
+    jail_stats=$(echo "$bans_raw" \
+        | awk '{
+            jail=""
+            for (i=1; i<=NF; i++) {
+                if ($i ~ /^\[.*\]$/) {
+                    jail=$i
+                    gsub(/[][]/, "", jail)
+                }
+            }
+            if (jail != "") c[jail]++
+        }
+        END {
+            for (j in c) {
+                printf "%s(%d) ", j, c[j]
+            }
+        }')
+
+    loginfo "Bans (${minutes}m): ${bans_count}"
+    loginfo "Attempts    : ${attempts_count}"
+    loginfo "Level       : ${level}"
+    [ -n "$jail_stats" ] && loginfo "Jails       : ${jail_stats}"
+
+    case "$level" in
+        LOW)      logsuccess "Status: LOW – safe for maintenance." ;;
+        MODERATE) logwarn    "Status: MODERATE – watch during changes." ;;
+        HIGH)     logalert   "Status: HIGH – avoid major config changes now." ;;
+        CRITICAL) logalert   "Status: CRITICAL – do NOT change NPM/nginx, monitor live (f2b monitor watch)." ;;
+    esac
+}
+
 ################################################################################
 # CORE FUNCTIONS
 ################################################################################
@@ -774,7 +851,7 @@ f2b_sync_enhanced() {
     else
       while read -r ip; do
         [ -z "${ip}" ] && continue
-        if ! echo "${f2b_ips}" | grep -qx "${ip}"; then
+        if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
           sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
         fi
       done <<<"${nft_ips}"
@@ -793,7 +870,7 @@ f2b_sync_enhanced() {
 
     while read -r ip; do
       [ -z "${ip}" ] && continue
-      if ! echo "${nft_ips}" | grep -qx "${ip}"; then
+      if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
         sudo nft add element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && added=$((added + 1))
       fi
     done <<<"${f2b_ips}"
@@ -843,7 +920,7 @@ sync_silent() {
     else
       while read -r ip; do
         [ -z "${ip}" ] && continue
-        if ! echo "${f2b_ips}" | grep -qx "${ip}"; then
+        if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
           sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
             && echo "$(date '+%Y-%m-%d %H:%M:%S') Removed orphan ${ip} from ${jail}" >>"$LOGFILE"
         fi
@@ -853,7 +930,7 @@ sync_silent() {
     # Add missing IPs do nft setu
     while read -r ip; do
       [ -z "${ip}" ] && continue
-      if ! echo "${nft_ips}" | grep -qx "${ip}"; then
+      if ! echo "${nft_ips}" | grep -Fxq "${ip}"; then
         sudo nft add element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
           && echo "$(date '+%Y-%m-%d %H:%M:%S') Added ${ip} to ${jail}" >>"$LOGFILE"
       fi
@@ -1019,13 +1096,16 @@ f2b_sync_docker_full() {
   )
 
   # 2. Pridaj IP, ktoré sú vo F2B a nie sú v docker-block
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! sudo nft get element inet docker-block docker-banned-ipv4 "{ $IP }" >/dev/null 2>&1; then
-      sudo nft add element inet docker-block docker-banned-ipv4 "{ $IP timeout 1h }" 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') ADDED  IPv4 $IP" | sudo tee -a "$LOGFILE" >/dev/null
-    fi
-  done <<<"$F2BIPS"
+    while IFS= read -r IP; do
+      [ -z "$IP" ] && continue
+
+      # membership check (správna nft syntax)
+      if ! sudo nft get element inet docker-block docker-banned-ipv4 { "$IP" } >/dev/null 2>&1; then
+        # ADD: bez explicitného timeoutu -> použije sa default timeout setu (u teba 7d)
+        sudo nft add element inet docker-block docker-banned-ipv4 { "$IP" } 2>/dev/null || true
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ADDED IPv4 $IP" | sudo tee -a "$LOGFILE" >/dev/null
+      fi
+    done <<<"$F2BIPS"
 
   # 3. Odstráň IP, ktoré sú v docker-block, ale už nie sú v žiadnom F2B sete
   local DOCKERIPS
@@ -1061,7 +1141,8 @@ f2b_sync_docker_full() {
   while IFS= read -r IP; do
     [ -z "$IP" ] && continue
     if ! sudo nft get element inet docker-block docker-banned-ipv6 "{ $IP }" >/dev/null 2>&1; then
-      sudo nft add element inet docker-block docker-banned-ipv6 "{ $IP timeout 1h }" 2>/dev/null || true
+      sudo nft add element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
+
       echo "$(date '+%Y-%m-%d %H:%M:%S') ADDED IPv6 $IP" | sudo tee -a "$LOGFILE" >/dev/null
     fi
   done <<<"$F2BIPS6"
@@ -3029,11 +3110,9 @@ report_attack_timeline() {
     log_warn "Fail2Ban log not found"
     return 1
   fi
-    echo "Metric: fail2ban.log events matching: BanFound OR ' Found ' OR ' Ban ' (excluding 'Increase Ban')"
-    echo
-  # Konzistentná definícia "attempt" (ako dashboard: Ban/Found events)
-  # - zámerne nepoužívaj len "Ban", lebo to matchne aj "Unban"
-  local EVENT_RE='(BanFound| Found | Ban )'
+
+  echo "Metric: fail2ban.filter ' Found ' events (all attack attempts, including non-banned)"
+  echo
 
   local -a hours
   local -a counts
@@ -3050,26 +3129,26 @@ report_attack_timeline() {
 
   # Nazbieraj po hodinách (23h ago .. 0h ago)
   for i in {23..0}; do
-    local hour_start hour_end count
+    local hour_start hour_end attempts_count
     hour_start="$(date -d "$i hours ago" '+%Y-%m-%d %H:00:00')"
     hour_end="$(date -d "$i hours ago" '+%Y-%m-%d %H:59:59')"
 
-    count="$(
-      awk -v s="$hour_start" -v e="$hour_end" -v re="$EVENT_RE" '
+    attempts_count="$(
+      awk -v s="$hour_start" -v e="$hour_end" '
         substr($0,1,19) >= s &&
         substr($0,1,19) <= e &&
-        $0 ~ re &&
-        $0 !~ /Increase Ban/ { c++ }
+        $0 ~ /fail2ban.filter/ &&
+        $0 ~ / Found / { c++ }
         END { print c+0 }
       ' "$TMP_F2B"
     )"
-    count="$(clean_number "$count")"
+    attempts_count="$(clean_number "${attempts_count:-0}")"
 
     hours+=( "$(date -d "$i hours ago" '+%H:00')" )
-    counts+=( "$count" )
+    counts+=( "$attempts_count" )
 
-    total_count=$((total_count + count))
-    [ "$count" -gt "$max_count" ] && max_count=$count
+    total_count=$((total_count + attempts_count))
+    [ "$attempts_count" -gt "$max_count" ] && max_count=$attempts_count
   done
 
   cleanup_tmp "$TMP_F2B"
@@ -3077,17 +3156,35 @@ report_attack_timeline() {
   local avg_count=$((total_count / 24))
   local bar_width=30
 
-  # Zobraz "každé 3 hodiny" + navyše posledné 2 hodiny (1 a 0)
-  local display_i=(23 20 17 14 11 8 5 2 1 0)
+  # --- DISPLAY: 2-hodinové bloky (12 riadkov), stále pokrýva 24h ---
+  # max pre 2h bloky (škálovanie barov)
+  local max_block=0
+  local i idx block_count
+  for i in $(seq 23 -2 1); do
+    idx=$((23 - i))
+    block_count=$(( ${counts[$idx]:-0} + ${counts[$((idx+1))]:-0} ))
+    block_count="$(clean_number "${block_count:-0}")"
+    [ "$block_count" -gt "$max_block" ] && max_block="$block_count"
+  done
 
-  for i in "${display_i[@]}"; do
-    local idx=$((23 - i))
-    local hour="${hours[$idx]}"
-    local count="${counts[$idx]}"
+  for i in $(seq 23 -2 1); do
+    idx=$((23 - i))
+
+    # Label pre 2h okno
+    local h_start h_end hour_range
+    h_start="$(date -d "$i hours ago" '+%H:00')"
+    h_end="$(date -d "$((i-1)) hours ago" '+%H:59')"
+    hour_range="${h_start}-${h_end}"
+
+    # 2h suma + avg/h (pre level prahy)
+    local count2h count_avg
+    count2h=$(( ${counts[$idx]:-0} + ${counts[$((idx+1))]:-0} ))
+    count2h="$(clean_number "${count2h:-0}")"
+    count_avg=$((count2h / 2))
 
     local bar_length=0
-    if [ "$max_count" -gt 0 ]; then
-      bar_length=$((count * bar_width / max_count))
+    if [ "$max_block" -gt 0 ]; then
+      bar_length=$((count2h * bar_width / max_block))
     fi
 
     local bar=""
@@ -3101,16 +3198,15 @@ report_attack_timeline() {
     done
 
     local level="LOW"
-    if [ "$count" -gt 200 ]; then
+    if [ "$count_avg" -gt 200 ]; then
       level="CRITICAL"
-    elif [ "$count" -gt 100 ]; then
+    elif [ "$count_avg" -gt 100 ]; then
       level="HIGH"
-    elif [ "$count" -gt 20 ]; then
+    elif [ "$count_avg" -gt 20 ]; then
       level="MODERATE"
     fi
 
-    # Formát ako predtým (hodina | bar | X attempts/h | LEVEL)
-   printf "%s  │ %s  %5s events/h  %-10s\n" "$hour" "$bar" "$count" "$level"
+    printf "%s  │ %s  %4s events/2h (%3s/h)  %-10s\n" "$hour_range" "$bar" "$count2h" "$count_avg" "$level"
   done
 
   echo
@@ -3157,6 +3253,7 @@ CORE:
   version [--json|--short]    Show version info
   version --json              Machine-readable JSON
   version --short             Short version string
+  alert-now <min> #optional   number of bans in last X minutes (default 5)
 
 SYNC:
   sync check                  Verify F2B ↔ nftables sync
@@ -3256,6 +3353,10 @@ main() {
             ;;
         version|--version|-v)
             f2b_version "$2"
+            ;;
+        alert-now)
+            # optional: minutes param
+            f2b_alert_now "${2:-5}"
             ;;
 
         # Sync commands
