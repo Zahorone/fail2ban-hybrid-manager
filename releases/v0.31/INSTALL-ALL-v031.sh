@@ -316,7 +316,7 @@ merge_ignoreip() {
 ###############################################################################
 # EMAIL
 ###############################################################################
-read -p "Do you want to configure email notifications? (yes/no): " -r EMAIL_REPLY
+read -r -p "Do you want to configure email notifications? (yes/no): " -r EMAIL_REPLY
 echo ""
 
 if [[ $EMAIL_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
@@ -324,8 +324,8 @@ if [[ $EMAIL_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
     log "Mail service detected"
     echo ""
 
-    read -p "Enter admin email address (for receiving alerts): " ADMIN_EMAIL
-    read -p "Enter sender email address (for From header): " SENDER_EMAIL
+    read -r -p "Enter admin email address (for receiving alerts): " ADMIN_EMAIL
+    read -r -p "Enter sender email address (for From header): " SENDER_EMAIL
     echo ""
 
     if [ -n "$ADMIN_EMAIL" ] && [ -n "$SENDER_EMAIL" ]; then
@@ -416,7 +416,7 @@ detect_ssh_client_ip() {
   echo "$ip"
 }
 
-read -p "Do you want to update Fail2Ban ignoreip whitelist? (yes/no): " -r IGN_REPLY
+read -r -p "Do you want to update Fail2Ban ignoreip whitelist? (yes/no): " -r IGN_REPLY
 echo ""
 
 if [[ $IGN_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
@@ -438,7 +438,7 @@ if [[ $IGN_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
     [ -z "$ADD_IP" ] && ADD_IP="$CLIENT_IP"
 
     # Docker subnet selection (with safe fallback)
-    read -p "Auto-add Docker subnets to ignoreip? (yes/no): " -r DOCKER_AUTO_REPLY
+    read -r -p "Auto-add Docker subnets to ignoreip? (yes/no): " -r DOCKER_AUTO_REPLY
     echo ""
 
     DOCKER_SUBNETS=""
@@ -509,7 +509,7 @@ if [[ $IGN_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
               warning "Docker network 'bridge' has no IPAM subnet info; cannot add it safely."
               echo ""
 
-              read -p "Fallback to ALL Docker bridge networks instead? (yes/no): " -r FALLBACK_REPLY
+              read -r -p "Fallback to ALL Docker bridge networks instead? (yes/no): " -r FALLBACK_REPLY
               echo ""
               if [[ $FALLBACK_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
                 SELECTED_NETS="$BRIDGE_NETS"
@@ -677,7 +677,8 @@ else
     echo "  sudo crontab -e"
     echo ""
     echo "Add this line:"
-    echo "  */1 * * * * flock -n /run/f2b-docker-validate.lock /usr/local/bin/f2b docker sync validate 2>&1 | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' | logger -t f2b-docker-validate"
+    printf '%s\n' "  */1 * * * * flock -n /run/f2b-docker-validate.lock /usr/local/bin/f2b docker sync validate 2>&1 | sed -r 's/\x1B\[[0-9;]*[A-Za-z]//g' | logger -t f2b-docker-validate"
+
 fi
 echo ""
 

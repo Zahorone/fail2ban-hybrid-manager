@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 ################################################################################
 # Component: f2b-docker-hook.sh
 # Part of: Fail2Ban Hybrid Nftables Manager
@@ -16,7 +17,7 @@
 #   - On unban: remove IP from corresponding docker-banned-ipv4/ipv6 set
 #   - Log each event to /var/log/f2b-docker-sync.log (JAIL, IP, set, timeout)
 ################################################################################
-#!/usr/bin/env bash
+
 set -euo pipefail
 
 MODE="${1:-}"

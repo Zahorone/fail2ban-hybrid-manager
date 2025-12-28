@@ -1100,6 +1100,7 @@ f2b_sync_docker_full() {
       [ -z "$IP" ] && continue
 
       # membership check (správna nft syntax)
+      # shellcheck disable=SC1083  
       if ! sudo nft get element inet docker-block docker-banned-ipv4 { "$IP" } >/dev/null 2>&1; then
         # ADD: bez explicitného timeoutu -> použije sa default timeout setu (u teba 7d)
         sudo nft add element inet docker-block docker-banned-ipv4 { "$IP" } 2>/dev/null || true
