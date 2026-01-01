@@ -1,8 +1,8 @@
-# Fail2Ban Hybrid Manager v0.31
+# Fail2Ban Hybrid Manager v0.33
 # Custom Configuration: jail.local
-# Date: 2025-12-26
-# 11 jails, nftables actions, recidive 30d
-# Managed by: INSTALL-ALL-v031 bundle
+# Date: 2026-01-01
+# 12 jails, nftables actions, recidive 30d
+# Managed by: INSTALL-ALL-v033 bundle
 # Docker-block immediate ban
 
 [DEFAULT]
@@ -80,8 +80,13 @@ bantime  = 30d
 maxretry = 4
 
 banaction = nftables-recidive
-unbanaction = nftables-recidive[actiontype=unban] 
-action = %(action_mwl)s
+# unbanaction netreba explicitne definovat v 'action', ak je default
+
+# Pôvodná 'action' nahradená custom definíciou pre lepšie logy v maile
+# Optimalizácia: timeout 5s + tail 5000 riadkov (predchádza zasekávaniu f2b pri veľkých logoch)
+action = nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", port="%(port)s", protocol="%(protocol)s", chain="%(chain)s"]
+         %(mta)s-whois-lines[name=%(__name__)s, sender="%(sender)s", dest="%(destemail)s", chain="%(chain)s", 
+           _grep_logs='timeout 5s sh -c "tail -q -n 5000 /opt/rustnpm/data/logs/*.log 2>/dev/null | grep -m 1000 -wF <ip>"']
 
 [manualblock]
 enabled  = true
@@ -130,7 +135,6 @@ action = %(action_)s
 enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
-           /opt/rustnpm/data/logs/proxy-host-*_access.log
 backend  = polling
 maxretry = 6
 findtime = 600
@@ -146,7 +150,6 @@ action = %(action_)s
 enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
-           /opt/rustnpm/data/logs/proxy-host-*_access.log
 backend  = polling
 maxretry = 3
 findtime = 600
@@ -163,7 +166,6 @@ action = %(action_)s
 enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
-           /opt/rustnpm/data/logs/proxy-host-*_access.log
 backend  = polling
 maxretry = 2
 findtime = 600
@@ -179,7 +181,6 @@ action = %(action_)s
 enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
-           /opt/rustnpm/data/logs/proxy-host-*_access.log
 backend  = polling
 maxretry = 1
 findtime = 600
@@ -194,7 +195,6 @@ enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_error.log
            /opt/rustnpm/data/logs/proxy-host-*_error.log
-           /var/log/nginx/error.log
 backend  = polling
 maxretry = 1
 findtime = 3600
@@ -209,7 +209,6 @@ action   = %(action_mwl)s
 enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
-           /opt/rustnpm/data/logs/proxy-host-*_access.log
 backend  = polling
 maxretry = 3
 findtime = 600
