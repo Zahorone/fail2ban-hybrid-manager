@@ -1,6 +1,8 @@
 # 🚀 Fail2Ban Hybrid Manager
 
-Fail2Ban Hybrid Manager je production-ready toolkit pre integráciu Fail2Ban s nftables (IPv4 + IPv6) a Dockerom, zameraný na hardened, opakovateľné servery – aktuálne s **v0.33 PHP Error Detection & Docker Auto-Sync Edition**.
+Fail2Ban Hybrid Manager is a production-ready toolkit for integrating Fail2Ban with nftables (IPv4 + IPv6) and Docker, designed for hardened, repeatable servers – now at **v0.33 PHP Error Detection & Docker Auto-Sync Edition**.
+
+It provides full IPv4/IPv6 dual-stack protection with critical Docker-block improvements and **universal PHP error detection** for all PHP applications (WordPress, Laravel, Symfony, Magento, EasyAppointment, custom apps, etc.).
 
 ## What this project provides
 
@@ -152,7 +154,7 @@ For full installation and troubleshooting instructions, follow:
   - Auto-detect server IP (optional whitelist)
   - Pre-cleanup with nftables backup
 
-### Infrastructure Comparison
+### 📊 Infrastructure Comparison
 
 | Feature | v0.31 | v0.33 |
 |---------|-------|-------|
@@ -160,9 +162,13 @@ For full installation and troubleshooting instructions, follow:
 | **nftables Sets** | 22 (11+11) | **24 (12+12)** ⭐ |
 | **INPUT Rules** | 22 | **24** |
 | **FORWARD Rules** | 6 | **8** |
-| **Docker Auto-Sync** | ✅ | ✅ Every 1 min |
+| **Docker Sync Strategy** | ✅ Immediate hook + cron | ✅ Two-tier + immediate hook |
+| **Sync Validate** | Every 1 min | **Every 1 min (improved)** |
+| **Sync Full** | Every 1 min | **Every 15 min (new)** |
 | **PHP Error Detection** | ❌ | **✅ NEW** |
 | **Total Files** | 34 | **42** |
+
+---
 
 ## License
 
