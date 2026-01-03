@@ -127,17 +127,17 @@ echo ""
 log_header "═══ KROK 3: INSTALL FILTERS (12) ═══"
 
 EXPECTED_FILTERS=(
-  "sshd.conf"
-  "f2b-exploit-critical.conf"
-  "f2b-dos-high.conf"
-  "f2b-web-medium.conf"
-  "nginx-recon-optimized.conf"
-  "f2b-fuzzing-payloads.conf"
-  "f2b-botnet-signatures.conf"
-  "f2b-anomaly-detection.conf"
-  "manualblock.conf"
-  "recidive.conf"
-  "f2b-nginx-php-errors.conf"
+"sshd.conf"
+"f2b-exploit-critical.conf"
+"f2b-dos-high.conf"
+"f2b-web-medium.conf"
+"nginx-recon-optimized.conf"
+"f2b-fuzzing-payloads.conf"
+"f2b-botnet-signatures.conf"
+"f2b-anomaly-detection.conf"
+"manualblock.conf"
+"recidive.conf"
+"nginx-php-errors.conf"
 )
 
 for filter in "${EXPECTED_FILTERS[@]}"; do
@@ -179,61 +179,65 @@ log_header "═══ KROK 5: INSTALL ACTIONS ═══"
 
 # nftables-common.local - KRITICKÝ súbor (table override)
 if [ -f "$ACTIONS_DIR/nftables-common.local" ]; then
-  echo -n "  nftables-common.local ... "
-  sudo cp "$ACTIONS_DIR/nftables-common.local" /etc/fail2ban/action.d/
-  echo "✓ (table override: fail2ban-filter)"
+echo -n " nftables-common.local ... "
+sudo cp "$ACTIONS_DIR/nftables-common.local" /etc/fail2ban/action.d/
+echo "✓ (table override: fail2ban-filter)"
 else
-  log_warn "nftables-common.local NOT FOUND - using defaults"
+log_warn "nftables-common.local NOT FOUND - using defaults"
 fi
 
 # nftables.conf.local - KRITICKÝ súbor (unified f2b-* set naming + defaults)
 if [ -f "$ACTIONS_DIR/nftables.conf.local" ]; then
-  echo -n "  nftables.conf.local ... "
-  sudo cp "$ACTIONS_DIR/nftables.conf.local" /etc/fail2ban/action.d/
-  echo "✓ (addr_set=f2b-, table=fail2ban-filter)"
+echo -n " nftables.conf.local ... "
+sudo cp "$ACTIONS_DIR/nftables.conf.local" /etc/fail2ban/action.d/
+echo "✓ (addr_set=f2b-, table=fail2ban-filter)"
 else
-  log_warn "nftables.conf.local NOT FOUND - using defaults"
+log_warn "nftables.conf.local NOT FOUND - using defaults"
 fi
 
 # nftables-multiport.conf - fallback (ak originál chýba)
 if [ -f /etc/fail2ban/action.d/nftables-multiport.conf ]; then
-  log_info "nftables-multiport.conf already exists (using existing)"
+log_info "nftables-multiport.conf already exists (using existing)"
 else
-  if [ -f "$ACTIONS_DIR/nftables-multiport.conf" ]; then
-    log_warn "nftables-multiport.conf missing - installing fallback"
-    echo -n "  nftables-multiport.conf ... "
-    sudo cp "$ACTIONS_DIR/nftables-multiport.conf" /etc/fail2ban/action.d/
-    echo "✓ (7d timeout - fallback)"
-  fi
+if [ -f "$ACTIONS_DIR/nftables-multiport.conf" ]; then
+log_warn "nftables-multiport.conf missing - installing fallback"
+echo -n " nftables-multiport.conf ... "
+sudo cp "$ACTIONS_DIR/nftables-multiport.conf" /etc/fail2ban/action.d/
+echo "✓ (7d timeout - fallback)"
+fi
 fi
 
 # nftables-recidive.conf - custom action (30d)
 if [ -f "$ACTIONS_DIR/nftables-recidive.conf" ]; then
-  echo -n "  nftables-recidive.conf ... "
-  sudo cp "$ACTIONS_DIR/nftables-recidive.conf" /etc/fail2ban/action.d/
-  echo "✓ (30d timeout - custom)"
+echo -n " nftables-recidive.conf ... "
+sudo cp "$ACTIONS_DIR/nftables-recidive.conf" /etc/fail2ban/action.d/
+echo "✓ (30d timeout - custom)"
 else
-  log_error "nftables-recidive.conf NOT FOUND!"
+log_error "nftables-recidive.conf NOT FOUND!"
+fi
+
+# docker-sync-hook.conf - OPRAVENÉ (chýbalo)
+if [ -f "$ACTIONS_DIR/docker-sync-hook.conf" ]; then
+echo -n " docker-sync-hook.conf ... "
+sudo cp "$ACTIONS_DIR/docker-sync-hook.conf" /etc/fail2ban/action.d/
+echo "✓ (docker-sync action)"
+else
+log_error "docker-sync-hook.conf NOT FOUND inside $ACTIONS_DIR!"
 fi
 
 # f2b-docker-hook.sh - helper pre docker-sync-hook (do /usr/local/sbin)
+# OPRAVENÉ: Súbor je v scripts/, takže používame SCRIPT_DIR
 if [ -f "$SCRIPT_DIR/f2b-docker-hook.sh" ]; then
-    echo -n " f2b-docker-hook.sh ... "
-    sudo cp "$SCRIPT_DIR/f2b-docker-hook.sh" /usr/local/sbin/f2b-docker-hook
-    sudo chmod 0755 /usr/local/sbin/f2b-docker-hook
-    sudo chown root:root /usr/local/sbin/f2b-docker-hook
-    echo "✓ (/usr/local/sbin/f2b-docker-hook)"
+echo -n " f2b-docker-hook.sh ... "
+sudo cp "$SCRIPT_DIR/f2b-docker-hook.sh" /usr/local/sbin/f2b-docker-hook
+sudo chmod 0755 /usr/local/sbin/f2b-docker-hook
+sudo chown root:root /usr/local/sbin/f2b-docker-hook
+echo "✓ (/usr/local/sbin/f2b-docker-hook)"
 else
-    log_warn "f2b-docker-hook.sh NOT FOUND - docker-sync-hook will not work"
+log_error "f2b-docker-hook.sh NOT FOUND in $SCRIPT_DIR!"
 fi
 
-
 echo ""
-
-################################################################################
-# KROK 6: CREATE LOG FILES
-################################################################################
-
 log_header "═══ KROK 6: CREATE LOG FILES ═══"
 
 LOG_FILES=(

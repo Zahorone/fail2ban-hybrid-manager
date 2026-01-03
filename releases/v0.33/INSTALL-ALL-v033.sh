@@ -568,6 +568,46 @@ else
   echo ""
 fi
 
+###############################################################################
+# SSH PORT CONFIGURATION
+###############################################################################
+
+read -r -p "Do you want to change the default SSH port (2222) for jails? (yes/no): " -r SSH_REPLY
+echo ""
+
+if [[ $SSH_REPLY =~ ^([Yy]es|[Yy])$ ]]; then
+  read -r -p "Enter custom SSH port (current: 2222): " CUSTOM_SSH_PORT
+  echo ""
+  
+  # Validácia, či je to číslo
+  if [[ "$CUSTOM_SSH_PORT" =~ ^[0-9]+$ ]]; then
+      log "Updating SSH port to $CUSTOM_SSH_PORT in jail.local..."
+      
+      # Funkcia na priamu náhradu v konkrétnych sekciách (sed je tu jednoduchší ako awk pre konkrétne sekcie)
+      # Najprv zálohujeme
+      cp "$JAIL_LOCAL" "$JAIL_LOCAL.backup-sshport-$(date +%s)"
+      
+      # Nahradíme port = 2222 za port = NOVY_PORT v sekcii [sshd] a [sshd-slowattack]
+      # Toto je trochu trickier, lebo port= môže byť hocikde.
+      # Najbezpečnejšie je použiť crudini alebo python, ale s bashom:
+      
+      # 1. Nahradíme v [sshd]
+      sed -i "/^\[sshd\]/,/^\[/ s/^port[[:space:]]*=[[:space:]]*[0-9]*/port = $CUSTOM_SSH_PORT/" "$JAIL_LOCAL"
+      
+      # 2. Nahradíme v [sshd-slowattack]
+      sed -i "/^\[sshd-slowattack\]/,/^\[/ s/^port[[:space:]]*=[[:space:]]*[0-9]*/port = $CUSTOM_SSH_PORT/" "$JAIL_LOCAL"
+      
+      log "SSH port updated successfully."
+      echo ""
+  else
+      warning "Invalid port number. Skipping SSH port update."
+      echo ""
+  fi
+else
+  info "Keeping default SSH port (2222)"
+  echo ""
+fi
+
 ################################################################################
 # INSTALLATION STEPS
 ################################################################################

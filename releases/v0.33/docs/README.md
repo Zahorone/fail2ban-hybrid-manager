@@ -333,26 +333,29 @@ v0.33/ (42 files)
 │   ├── 04-install-docker-block-v033.sh
 │   ├── 05-install-auto-sync-v033.sh
 │   ├── 06-install-aliases-v033.sh
-│   └── 07-setup-docker-sync-cron-v033.sh
+│   ├── 07-setup-docker-sync-cron-v033.sh
+│   ├──  f2b-docker-hook.sh
+│   └── f2b-wrapper-v033.sh 
 ├── filters/                          # 12 filter configs
 │   ├── sshd.conf
 │   ├── f2b-*.conf (9 filters)
 │   └── nginx-php-errors.conf ⭐ NEW
 ├── actions/                          # Action scripts
-│   ├── nftables-multiport
-│   ├── nftables-allports
-│   ├── docker-hook
-│   └── f2b-docker-hook.sh
+│   ├── nftables-multiport.conf
+│   ├── nftables-common.local
+│   ├── nftables-recidive.conf
+│   ├── nftables.conf.local
+│   └──docker-sync-hook.conf
 ├── config/                           # Configuration files
 │   ├── jail.local
-│   ├── *.local (local tuning files)
-│   └── nginx-php-errors.local ⭐ NEW
-├── f2b-wrapper-v033.sh              # Main wrapper (50+ functions)
-├── README.md                         # Full documentation
-├── CHANGELOG.md                      # Detailed version history
-├── MIGRATION-GUIDE.md                # v0.31 → v0.33 upgrade guide
-├── PACKAGE-INFO.txt                  # Package metadata
-└── LICENSE                           # MIT License
+│   ├── f2b-anomaly-detection.local
+│   └── nginx-recon-optimized.local
+└── docs/ 
+    ├── README.md                         # Full documentation
+    ├── CHANGELOG.md                      # Detailed version history
+    ├── MIGRATION-GUIDE.md                # v0.31 → v0.33 upgrade guide
+    ├── PACKAGE-INFO.txt                  # Package metadata
+    └── LICENSE                           # MIT License
 ```
 
 ---
