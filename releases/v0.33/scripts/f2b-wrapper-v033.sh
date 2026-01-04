@@ -2436,8 +2436,9 @@ analyze_npm_http_status() {
         return 1
     fi
 
+    # UPRAVENÉ: Pridaný grep -v na odfiltrovanie Docker Gateway IP 172.18.0.1
     local _RECENT_LOGS
-    _RECENT_LOGS=$(sudo cat "${ACCESS_LOGS[@]}" 2>/dev/null | tail -5000)
+    _RECENT_LOGS=$(sudo cat "${ACCESS_LOGS[@]}" 2>/dev/null | tail -5000 | grep -v "172.18.0.1")
 
     if [ -z "$_RECENT_LOGS" ]; then
         log_warn "No log lines available for analysis"
@@ -2501,7 +2502,9 @@ analyze_npm_attack_patterns() {
     fi
 
     local ALL_LOGS
-    ALL_LOGS=$(sudo cat "$NPM_LOG_DIR"/*_access.log 2>/dev/null)
+    # ALL_LOGS=$(sudo cat "$NPM_LOG_DIR"/*_access.log 2>/dev/null)
+    # UPRAVENÉ: Pridaný grep -v
+    ALL_LOGS=$(sudo cat "$NPM_LOG_DIR"/*_access.log 2>/dev/null | grep -v "172.18.0.1")
 
     # Detect attack patterns
     local SQL_INJ PATH_TRAV PHP_EXPLOIT SHELL_RCE SCANNER GIT_EXPOSE
@@ -2568,10 +2571,10 @@ analyze_top_source_ips_444() {
         | awk '($4==444 || $5==444)' \
         | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
         | sed 's/^\[Client //; s/\]$//' \
+        | grep -v '172.18.0.1' \
         | sort | uniq -c | sort -rn | head -10 \
         | awk '{printf "  %5d x %s\n", $1, $2}'
     )
-
 
     if [ -n "$out" ]; then
         echo "$out"
@@ -2629,6 +2632,7 @@ analyze_top_source_ips_404() {
         | awk '($4==404 || $5==404)' \
         | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
         | sed 's/^\[Client //; s/\]$//' \
+        | grep -v '172.18.0.1' \
         | sort | uniq -c | sort -rn | head -10 \
         | awk '{printf "  %5d x %s\n", $1, $2}'
     )
@@ -2636,7 +2640,6 @@ analyze_top_source_ips_404() {
     [ -n "$out" ] && echo "$out" || echo "  None"
     echo ""
 }
-
 analyze_top_user_agents_suspicious() {
     log_header "Top 10 Scanners by User-Agent (404/444, recent logs)"
     echo ""
