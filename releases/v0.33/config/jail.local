@@ -28,7 +28,7 @@ action_ = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
 
 action_mwl = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
              docker-sync-hook
-             sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", protocol="%(protocol)s", chain="%(chain)s"]
+             sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", protocol="%(protocol)s", chain="%(chain)s", logpath="%(logpath)s"]
 
 ################################################################################
 # SSH JAILS (nftables + docker-sync-hook)
@@ -86,7 +86,7 @@ banaction = nftables-recidive
 # Optimalizácia: timeout 5s + tail 5000 riadkov (predchádza zasekávaniu f2b pri veľkých logoch)
 action = nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", port="%(port)s", protocol="%(protocol)s", chain="%(chain)s"]
          %(mta)s-whois-lines[name=%(__name__)s, sender="%(sender)s", dest="%(destemail)s", chain="%(chain)s", 
-           _grep_logs='timeout 5s sh -c "tail -q -n 5000 /opt/rustnpm/data/logs/*.log 2>/dev/null | grep -m 1000 -wF <ip>"']
+           _grep_logs='timeout 5s sh -c "tail -q -n 50000 /opt/rustnpm/data/logs/*.log 2>/dev/null | grep -m 1000 -wF <ip>"']
 
 [manualblock]
 enabled  = true
