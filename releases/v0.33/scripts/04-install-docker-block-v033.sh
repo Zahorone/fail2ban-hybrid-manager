@@ -115,7 +115,7 @@ table inet docker-block {
   }
 
   chain prerouting {
-    type filter hook prerouting priority dstnat; policy accept;
+    type filter hook prerouting priority dstnat -10; policy accept;
 
     # CRITICAL: Drop banned IPs FIRST (before any NAT)
     ip saddr @docker-banned-ipv4 drop
