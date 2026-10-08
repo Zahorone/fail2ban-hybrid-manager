@@ -26,6 +26,9 @@ Development candidate; not approved for production deployment.
   detection to `f2b-exploit-critical` for NPM access logs and nginx warning/error
   logs. The managed jail override applies a one-year ban on the first match and
   tails newly added error logs without replaying historical entries.
+- Added high-confidence credential-file reads, exact known webshell basenames,
+  and executable upload-tree writes to the same critical jail without matching
+  ordinary application POSTs or non-executable uploads.
 
 ### Tests
 
@@ -37,5 +40,7 @@ Development candidate; not approved for production deployment.
 - Optional Easy!Appointments scope, refusal and backup/restore tests.
 - Twenty malicious access/error fixtures across IPv4 and IPv6 plus thirteen
   benign cases, including payload text present only in the referrer.
+- Twenty-four credential, webshell and executable-upload attack fixtures plus
+  thirteen benign access-log cases.
 
 The historical v0.33 changelog remains in `releases/v0.33/docs/CHANGELOG.md`.

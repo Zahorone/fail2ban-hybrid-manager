@@ -27,6 +27,9 @@ test gates have passed.
   `allow_url_include` plus `auto_prepend_file=php://input` requests in both NPM
   access logs and nginx error logs. One match receives a 365-day ban; historical
   error logs are registered with `tail` to prevent replay.
+- The same critical jail detects exact private credential paths, known webshell
+  basenames, and executable-file writes below upload-like path segments. These
+  signatures remain scoped to the NPM request target.
 
 ## Trusted reporting probes
 

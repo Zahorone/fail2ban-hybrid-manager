@@ -66,6 +66,9 @@ exploit_jail = (ROOT / "config/exploit-critical-rce.local").read_text()
 assert exploit_filter.count("ignoreregex =") == 1
 assert "%%%%32%%65" in exploit_filter
 assert "request:" in exploit_filter
+assert "authorized_keys" in exploit_filter
+assert "wp_filemanager" in exploit_filter
+assert "(?:uploads?|files?|images?)" in exploit_filter
 assert "maxretry = 1" in exploit_jail
 assert "bantime = 31536000" in exploit_jail
 assert "/opt/rustnpm/data/logs/*_error.log tail" in exploit_jail

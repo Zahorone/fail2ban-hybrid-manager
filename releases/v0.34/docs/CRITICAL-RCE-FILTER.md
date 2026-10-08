@@ -13,6 +13,18 @@ The v0.34 rules add two deliberately narrow request-target signatures:
   `auto_prepend_file=php://input`, in either order, with common percent-encoded
   forms of `=`, `:` and `/`.
 
+The filter also covers three high-confidence groups in NPM access logs:
+
+- direct reads of SSH, GnuPG, Google Cloud and Azure credential files listed
+  in the filter, under any directory prefix;
+- the exact known webshell basenames `wso.php`, `b374k.php`, `alfa.php`,
+  `wp_filemanager.php`, `filemanager.php`, `priv8.php`, and `mini_shell.php`;
+- `POST`, `PUT`, or `PATCH` of a final `.php`, `.phpN`, `.phtml`, or `.phar`
+  filename below an `upload(s)`, `file(s)`, or `image(s)` path segment.
+
+Ordinary image/PDF uploads, names such as `logo.php.png` or `.php.txt`, normal
+application POSTs, and merely similar filenames are outside these signatures.
+
 Matching is limited to the quoted request target in NPM access logs or the
 quoted `request:` field in nginx warning/error logs. Payload text occurring
 only in User-Agent or Referer is not a ban reason. Existing assets and
@@ -26,5 +38,7 @@ registered. The upgrade workflow installs the override without replacing the
 site's main `jail.local`.
 
 Regression coverage is in `tests/fixtures/exploit-critical-attacks.log` and
-`tests/fixtures/exploit-critical-benign.log`; CI executes the fixtures through
-`fail2ban-regex` as well as the parser-level assertions.
+the related `exploit-critical-*.log` fixtures; CI executes all fixtures through
+`fail2ban-regex` as well as the parser-level assertions. The high-risk fixture
+adds 24 malicious and 13 benign access-log cases, including dangerous text only
+in a Referer.
