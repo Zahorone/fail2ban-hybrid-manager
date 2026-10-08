@@ -23,9 +23,9 @@
 set -e
 
 # shellcheck disable=SC2034
-RELEASE="v0.33"
+RELEASE="v0.33-ipv6.1"
 # shellcheck disable=SC2034
-VERSION="0.33"
+VERSION="0.33-ipv6.1"
 # shellcheck disable=SC2034
 BUILD_DATE="2026-01-01"
 # shellcheck disable=SC2034
@@ -76,7 +76,7 @@ fi
 # Dependencies check
 info "Checking dependencies..."
 MISSING=0
-for cmd in nft fail2ban-client systemctl; do
+for cmd in nft fail2ban-client systemctl python3; do
   if ! command -v "$cmd" &>/dev/null; then
     error "Missing: $cmd"
     # shellcheck disable=SC2317
@@ -214,6 +214,11 @@ done
 log "Cleanup complete"
 echo ""
 
+# The wrapper invokes this helper for IPv6 synchronization. Install it first.
+[ -f "$SCRIPT_DIR/f2b-ipv6-sync.py" ] || error "Missing f2b-ipv6-sync.py"
+/usr/bin/python3 -c "from fail2ban.client.csocket import CSocket" || error "Missing Fail2Ban Python module"
+install -o root -g root -m 0755 "$SCRIPT_DIR/f2b-ipv6-sync.py" /usr/local/sbin/f2b-ipv6-sync.py
+
 # Step 3: Install wrapper
 log "Step 3/5: Installing F2B wrapper..."
 
@@ -269,4 +274,3 @@ echo ""
 
 # Quick start guide (ponechané ako v pôvodnom skripte) ...
 # [zvyšok sú len echo-info; netreba meniť kvôli --yes režimu]
-

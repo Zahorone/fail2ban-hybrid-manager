@@ -82,11 +82,9 @@ maxretry = 5
 banaction = nftables-recidive
 # unbanaction netreba explicitne definovat v 'action', ak je default
 
-# Pôvodná 'action' nahradená custom definíciou pre lepšie logy v maile
-# Optimalizácia: timeout 5s + tail 5000 riadkov (predchádza zasekávaniu f2b pri veľkých logoch)
+# Recidive matches Fail2Ban ban events, so include that log in notifications.
 action = nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", port="%(port)s", protocol="%(protocol)s", chain="%(chain)s"]
-         %(mta)s-whois-lines[name=%(__name__)s, sender="%(sender)s", dest="%(destemail)s", chain="%(chain)s", 
-           _grep_logs='timeout 5s sh -c "tail -q -n 50000 /opt/rustnpm/data/logs/*.log 2>/dev/null | grep -m 1000 -wF <ip>"']
+         %(mta)s-whois-lines[name=%(__name__)s, sender="%(sender)s", dest="%(destemail)s", chain="%(chain)s", logpath="%(logpath)s", grepopts="-a -m <grepmax>"]
 
 [manualblock]
 enabled  = true

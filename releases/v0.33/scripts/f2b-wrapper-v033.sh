@@ -33,11 +33,27 @@
 
 set -o pipefail
 
+# Operational commands read the Fail2Ban socket, change nftables or write
+# root-owned logs. Keep the help screen available to every user, but fail closed
+# for all operational commands when the wrapper is not run through sudo.
+case "${1:-}" in
+  ""|help|--help|-h) help_only=true ;;
+  *)                 help_only=false ;;
+esac
+if (( EUID != 0 )) && [[ "$help_only" != true ]]; then
+  printf 'f2b requires root privileges. Run: sudo f2b' >&2
+  if (( $# > 0 )); then
+    printf ' %q' "$@" >&2
+  fi
+  printf '\n' >&2
+  exit 1
+fi
+
 # Meta
 # shellcheck disable=SC2034
-RELEASE="v0.33"
+RELEASE="v0.33-ipv6.1"
 # shellcheck disable=SC2034
-VERSION="0.33"
+VERSION="0.33-ipv6.1"
 # shellcheck disable=SC2034
 BUILD_DATE="2026-01-01"
 # shellcheck disable=SC2034
@@ -163,31 +179,9 @@ validate_port() {
 }
 
 validate_ip() {
-  local ip="$1"
-
-  # IPv4
-  if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    return 0
-  fi
-
-  # IPv6 – jednoduchý, ale prísnejší check cez ip(8)
-  if command -v ip >/dev/null 2>&1; then
-    if ip -6 addr add "$ip/128" dev lo 2>/dev/null; then
-      ip -6 addr del "$ip/128" dev lo 2>/dev/null
-      return 0
-    else
-      logerror "Invalid IP address: $ip"
-      return 1
-    fi
-  fi
-
-  # Fallback: dnešná heuristika
-  if [[ "$ip" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$ip" == *:* ]]; then
-    return 0
-  fi
-
-  logerror "Invalid IP address: $ip"
-  return 1
+  python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$1" 2>/dev/null || {
+    log_error "Invalid IP address: $1"; return 1;
+  }
 }
 
 ################################################################################
@@ -274,29 +268,32 @@ get_f2b_count() {
   esac
 }
 
-get_f2b_ips() {
-  local jail="$1"
+# wrapper-ipv6-fix-20261008
+ipv6_set_for_jail() {
+  local jail="$1" candidate
+  # The standard nftables action uses addr6-set; recidive uses a managed set.
+  if [[ "$jail" == recidive ]]; then
+    printf '%s\n' f2b-recidive-v6; return
+  fi
+  for candidate in "addr6-set-${jail}" "${SETMAP[$jail]}-v6"; do
+    if sudo nft list set inet fail2ban-filter "$candidate" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"; return
+    fi
+  done
+  return 1
+}
 
-  sudo fail2ban-client status "$jail" 2>/dev/null \
-    | awk '/Banned IP list:/ {
-        sub(/^.*Banned IP list:[[:space:]]*/, "", $0);
-        print;
-        exit
-      }' \
-    | tr ' ' '\n' \
-    | while IFS= read -r tok; do
-        [[ -z "$tok" ]] && continue
-        # TITLE Keep current fast heuristics
-        if [[ "$tok" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-          echo "$tok"
-          continue
-        fi
-        if [[ "$tok" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$tok" == *:* ]]; then
-          echo "$tok"
-          continue
-        fi
-      done \
-    | sort -u
+canonical_ips() {
+  python3 -c 'import ipaddress,sys
+for token in sys.stdin.read().split():
+ try: print(ipaddress.ip_address(token))
+ except ValueError: pass'
+}
+
+get_f2b_ips() {
+  local jail="$1" result
+  result=$(sudo fail2ban-client get "$jail" banip 2>/dev/null) || return 1
+  printf '%s\n' "$result" | canonical_ips | sort -u
 }
 
 get_nft_ips() {
@@ -306,7 +303,7 @@ get_nft_ips() {
 
   if jq_check_installed; then
     # TITLE Prefer JSON parsing when jq is available (supports both elem schemas)
-    sudo nft -j list set "$F2BTABLE" "$set" 2>/dev/null \
+    sudo nft -j list set $F2BTABLE "$set" 2>/dev/null \
       | jq -r '
           .nftables[]
           | select(.set? and .set.elem?)
@@ -320,13 +317,13 @@ get_nft_ips() {
       | sort -u
   else
     # TITLE Fallback: regex-based parsing (current behavior)
-    if [[ "$set" == *-v6 ]]; then
-      sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
+    if [[ "$set" == *-v6 || "$set" == addr6-set-* ]]; then
+      sudo nft list set $F2BTABLE "$set" 2>/dev/null \
         | grep -oE '[0-9a-fA-F:]+' \
         | grep -F ':' \
         | sort -u
     else
-      sudo nft list set "$F2BTABLE" "$set" 2>/dev/null \
+      sudo nft list set $F2BTABLE "$set" 2>/dev/null \
         | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
         | sort -u
     fi
@@ -515,7 +512,7 @@ EOF
             if sudo nft list set inet fail2ban-filter "${setname}" >/dev/null 2>&1; then
               sets_v4=$((sets_v4 + 1))
             fi
-            if sudo nft list set inet fail2ban-filter "${setname}-v6" >/dev/null 2>&1; then
+            if ipv6_set_for_jail "$jail" >/dev/null; then
               sets_v6=$((sets_v6 + 1))
             else
               missing_v6=$((missing_v6 + 1))
@@ -527,9 +524,9 @@ EOF
           echo "  - Sets: ${sets_total} (v4: ${sets_v4}, v6: ${sets_v6}, missing v6: ${missing_v6})"
 
           if [ "${missing_v6}" -eq 0 ] && [ "${sets_v6}" -gt 0 ]; then
-            echo "  - IPv6 readiness: READY (all mapped jails have -v6 sets)"
+            echo "  - IPv6 sets present (external connectivity and drop rules need separate verification)"
           else
-            echo "  - IPv6 readiness: INCOMPLETE (${missing_v6} jails without -v6 sets)"
+            echo "  - IPv6 readiness: INCOMPLETE (${missing_v6} jails without an existing IPv6 set (may be created on first ban))"
           fi
         else
           echo "  - Table inet fail2ban-filter: NOT FOUND"
@@ -655,23 +652,17 @@ f2b_find() {
     return 1
   fi
 
-  # Detect IP family (v4 / v6)
-  local IP_FAMILY=""
-  if [[ "$IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    IP_FAMILY="4"
-  elif [[ "$IP" =~ ^[0-9a-fA-F:]+$ ]] && [[ "$IP" == *:* ]]; then
-    IP_FAMILY="6"
-  else
-    log_error "Invalid IP address: $IP"
-    return 1
-  fi
+  validate_ip "$IP" || return 1
+  IP=$(printf '%s\n' "$IP" | canonical_ips)
+  local IP_FAMILY=4
+  [[ "$IP" == *:* ]] && IP_FAMILY=6
 
   log_header "Searching for $IP"
   local found=0
 
   for jail in "${JAILS[@]}"; do
     # Find in jail (no parsing of set output; only check Fail2Ban state)
-    if sudo fail2ban-client status "$jail" 2>/dev/null | grep -Fq "$IP"; then
+    if get_f2b_ips "$jail" | grep -Fxq "$IP"; then
       log_success "Found in jail: $jail"
 
       local bantime
@@ -683,7 +674,7 @@ f2b_find() {
         log_warn "nftables: No set mapping for jail '$jail' (SETMAP missing)"
       else
         local set_to_check="$nftset"
-        [ "$IP_FAMILY" = "6" ] && set_to_check="${nftset}-v6"
+        [ "$IP_FAMILY" = "6" ] && set_to_check="$(ipv6_set_for_jail "$jail")"
 
         if ! sudo nft list set $F2BTABLE "$set_to_check" &>/dev/null; then
           log_warn "nftables: Set not found: $set_to_check"
@@ -766,12 +757,13 @@ f2b_sync_check() {
 
     if [ -n "$nftset" ]; then
       # v4 set
-      if sudo nft list set "$F2BTABLE" "$nftset" &>/dev/null; then
+      if sudo nft list set $F2BTABLE "$nftset" &>/dev/null; then
         N4="$(get_nft_ips "$nftset" | wc -l | tr -d '[:space:]')"
       fi
       # v6 set (expected name: ${nftset}-v6)
-      if sudo nft list set "$F2BTABLE" "${nftset}-v6" &>/dev/null; then
-        N6="$(get_nft_ips "${nftset}-v6" | wc -l | tr -d '[:space:]')"
+      local nftset6
+      if nftset6=$(ipv6_set_for_jail "$jail"); then
+        N6="$(get_nft_ips "$nftset6" | wc -l | tr -d '[:space:]')"
       fi
     fi
 
@@ -817,6 +809,7 @@ f2b_sync_check() {
 
 # f2b_sync_enhanced – dvojstranný sync s reportom
 f2b_sync_enhanced() {
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || return 1
   log_header "F2B SYNC ENHANCED (bidirectional)"
   local removed=0
   local added=0
@@ -827,7 +820,8 @@ f2b_sync_enhanced() {
     [ -z "${nft_set}" ] && continue
 
     local f2b_ips nft_ips ip
-    f2b_ips=$(get_f2b_ips "${jail}")
+    f2b_ips=$(get_f2b_ips "${jail}") || return 1
+    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
     nft_ips=$(get_nft_ips "${nft_set}")
 
     local f2b_count nft_count
@@ -838,13 +832,13 @@ f2b_sync_enhanced() {
     if [ -z "${f2b_ips}" ]; then
       while read -r ip; do
         [ -z "${ip}" ] && continue
-        sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
+        sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
       done <<<"${nft_ips}"
     else
       while read -r ip; do
         [ -z "${ip}" ] && continue
         if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
-          sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
+          sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
         fi
       done <<<"${nft_ips}"
     fi
@@ -857,13 +851,14 @@ f2b_sync_enhanced() {
     [ -z "${nft_set}" ] && continue
 
     local f2b_ips nft_ips ip
-    f2b_ips=$(get_f2b_ips "${jail}")
+    f2b_ips=$(get_f2b_ips "${jail}") || return 1
+    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
     nft_ips=$(get_nft_ips "${nft_set}")
 
     while read -r ip; do
       [ -z "${ip}" ] && continue
-      if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
-        sudo nft add element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && added=$((added + 1))
+      if ! echo "${nft_ips}" | grep -Fxq "${ip}"; then
+        sudo nft add element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && added=$((added + 1))
       fi
     done <<<"${f2b_ips}"
   done
@@ -888,6 +883,7 @@ f2b_sync_force() {
 
 # sync_silent – tichá F2B → nft sync pre cron
 sync_silent() {
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || return 1
   local LOGFILE="/var/log/f2b-sync.log"
   local CHANGES=0
 
@@ -899,21 +895,22 @@ sync_silent() {
 
     local f2b_ips nft_ips ip
 
-    f2b_ips=$(get_f2b_ips "${jail}")
+    f2b_ips=$(get_f2b_ips "${jail}") || return 1
+    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
     nft_ips=$(get_nft_ips "${nft_set}")
 
     # Remove orphaned IPs z nft setu
     if [ -z "${f2b_ips}" ]; then
       while read -r ip; do
         [ -z "${ip}" ] && continue
-        sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
+        sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
           && echo "$(date '+%Y-%m-%d %H:%M:%S') Removed orphan ${ip} from ${jail}" >>"$LOGFILE"
       done <<<"${nft_ips}"
     else
       while read -r ip; do
         [ -z "${ip}" ] && continue
         if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
-          sudo nft delete element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
+          sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
             && echo "$(date '+%Y-%m-%d %H:%M:%S') Removed orphan ${ip} from ${jail}" >>"$LOGFILE"
         fi
       done <<<"${nft_ips}"
@@ -923,7 +920,7 @@ sync_silent() {
     while read -r ip; do
       [ -z "${ip}" ] && continue
       if ! echo "${nft_ips}" | grep -Fxq "${ip}"; then
-        sudo nft add element "${F2BTABLE}" "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
+        sudo nft add element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
           && echo "$(date '+%Y-%m-%d %H:%M:%S') Added ${ip} to ${jail}" >>"$LOGFILE"
       fi
     done <<<"${f2b_ips}"
@@ -968,7 +965,8 @@ f2b_docker_verify() {
       f2b-manualblock \
       f2b-fuzzing-payloads \
       f2b-botnet-signatures \
-      f2b-anomaly-detection; do
+      f2b-anomaly-detection \
+      f2b-nginx-php-errors; do
       sudo nft list set inet fail2ban-filter "$set" 2>/dev/null \
         | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || true
     done | sort -u
@@ -1072,6 +1070,7 @@ f2b_sync_docker_full() {
     "f2b-fuzzing-payloads"
     "f2b-botnet-signatures"
     "f2b-anomaly-detection"
+    "f2b-nginx-php-errors"
   )
 
   ##############################################################################
@@ -1121,42 +1120,12 @@ f2b_sync_docker_full() {
   # IPv6 SYNC – UNION F2B setov ↔ docker-banned-ipv6
   ##############################################################################
 
-  local F2BIPS6
-  F2BIPS6=$(
-    for SET in "${SETS[@]}"; do
-      sudo nft list set inet fail2ban-filter "${SET}-v6" 2>/dev/null \
-        | grep -oE '[0-9a-fA-F: ]+' \
-        | grep -F ':' || true
-    done | sort -u
-  )
-
-  # 2. Pridaj IPv6 vo F2B, ktoré nie sú v docker-block
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! sudo nft get element inet docker-block docker-banned-ipv6 "{ $IP }" >/dev/null 2>&1; then
-      sudo nft add element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
-
-      echo "$(date '+%Y-%m-%d %H:%M:%S') ADDED IPv6 $IP" | sudo tee -a "$LOGFILE" >/dev/null
-    fi
-  done <<<"$F2BIPS6"
-
-  # 3. Odstráň IPv6, ktoré sú v docker-block, ale už nie vo F2B
-  local DOCKERIPS6
-  DOCKERIPS6=$(
-    sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
-      | grep -oE '[0-9a-fA-F: ]+' \
-      | grep -F ':' \
-      | sort -u || true
-  )
-
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! echo "$F2BIPS6" | grep -qx "$IP"; then
-      sudo nft delete element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') REMOVED IPv6 $IP (no longer in Fail2Ban)" \
-        | sudo tee -a "$LOGFILE" >/dev/null
-    fi
-  done <<<"$DOCKERIPS6"
+  local REMOVED6=0
+  # IPv6 authority is the Fail2Ban runtime, not legacy alias sets.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || {
+    log_error "IPv6 sync failed; existing bans preserved where possible"
+    return 1
+  }
 
   ##############################################################################
   # METRIKY – porovnanie počtov (jaily vs docker-block)
@@ -1323,6 +1292,7 @@ f2b_sync_docker() {
     "f2b-fuzzing-payloads"
     "f2b-botnet-signatures"
     "f2b-anomaly-detection"
+    "f2b-nginx-php-errors"
   )
 
   ##############################################################################
@@ -1361,33 +1331,12 @@ f2b_sync_docker() {
   # IPv6 VALIDATION – Remove orphaned IPv6 addresses
   ##############################################################################
 
-  local F2BIPS6
-  F2BIPS6=$(
-    for SET in "${SETS[@]}"; do
-      sudo nft list set inet fail2ban-filter "${SET}-v6" 2>/dev/null \
-        | grep -oE '[0-9a-fA-F:]+' \
-        | grep -F ':' || true
-    done | sort -u
-  )
-
   local REMOVED6=0
-  local DOCKERIPS6
-  DOCKERIPS6=$(
-    sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
-      | grep -oE '[0-9a-fA-F:]+' \
-      | grep -F ':' \
-      | sort -u || true
-  )
-
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! echo "$F2BIPS6" | grep -qx "$IP"; then
-      sudo nft delete element inet docker-block docker-banned-ipv6 "{ $IP }" 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') [SYNC] REMOVED IPv6 $IP (no longer in Fail2Ban)" \
-        | sudo tee -a "$LOGFILE" >/dev/null
-      REMOVED6=$((REMOVED6 + 1))
-    fi
-  done <<<"$DOCKERIPS6"
+  # IPv6 authority is the Fail2Ban runtime, not legacy alias sets.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || {
+    log_error "IPv6 sync failed; existing bans preserved where possible"
+    return 1
+  }
 
   ##############################################################################
   # METRICS – Compare counts
@@ -1444,7 +1393,7 @@ f2b_sync_docker() {
   loginfo "Jails IPv6: total=$TOTAL6 (dup=$DUP6, unique=$UNIQUE6)"
   loginfo "Docker-block IPv4 elements: $DOCKER4 (auto-merge may differ from unique IPs)"
   loginfo "Docker-block IPv6 elements: $DOCKER6 (auto-merge may differ from unique IPs)"
-  loginfo "Removed (orphaned): IPv4=$REMOVED, IPv6=$REMOVED6"
+  loginfo "Removed (orphaned): IPv4=$REMOVED; IPv6 reconciled by runtime helper"
   echo ""
 
   # Diff check
@@ -1961,8 +1910,8 @@ manage_unban_all() {
         nftset="${SETMAP[$jail]}"
         [ -z "$nftset" ] && continue
 
-        if sudo nft list set "$F2BTABLE" "$nftset" 2>/dev/null | grep -q "$ip"; then
-            if sudo nft delete element "$F2BTABLE" "$nftset" "{ $ip }" 2>/dev/null; then
+        if sudo nft list set $F2BTABLE "$nftset" 2>/dev/null | grep -q "$ip"; then
+            if sudo nft delete element $F2BTABLE "$nftset" "{ $ip }" 2>/dev/null; then
                 log_info "Removed from nftables: $nftset"
                 ((removed++))
             fi
@@ -2542,7 +2491,7 @@ analyze_probed_paths() {
     fi
 
     echo "$RECENT_LOGS" \
-        | awk '($4==404 || $5==404)' \
+        | grep -E '(^| )404( |$)' \
         | awk -F\" 'NF>=2 {print $2}' \
         | sort | uniq -c | sort -rn | head -10 \
         | awk '{printf "  %5d x %s\n", $1, $2}'
@@ -2568,7 +2517,7 @@ analyze_top_source_ips_444() {
     local out
       out=$(
       echo "$RECENT_LOGS" \
-        | awk '($4==444 || $5==444)' \
+        | grep -E '(^| )444( |$)' \
         | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
         | sed 's/^\[Client //; s/\]$//' \
         | grep -v '172.18.0.1' \
@@ -2599,7 +2548,7 @@ analyze_top_user_agents_444() {
     # Príklad: ...] "cypex.ai/scanning Mozilla/5.0 ... Safari/537.36" "-"
     local out
     out=$(echo "$RECENT_LOGS" \
-        | awk '($4==444 || $5==444)' \
+        | grep -E '(^| )444( |$)' \
         | awk -F\" 'NF>=4 {print $(NF-3)}' \
         | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
         | grep -vE '^(|-)$' \
@@ -2629,7 +2578,7 @@ analyze_top_source_ips_404() {
 
     out=$(
       echo "$RECENT_LOGS" \
-        | awk '($4==404 || $5==404)' \
+        | grep -E '(^| )404( |$)' \
         | grep -oE '\[Client [0-9]{1,3}(\.[0-9]{1,3}){3}\]' \
         | sed 's/^\[Client //; s/\]$//' \
         | grep -v '172.18.0.1' \
@@ -2652,7 +2601,7 @@ analyze_top_user_agents_suspicious() {
 
     local out
     out=$(echo "$RECENT_LOGS" \
-        | awk '($4==404 || $5==404 || $4==444 || $5==444)' \
+        | grep -E '(^| )(404|444)( |$)' \
         | awk -F\" 'NF>=4 {print $(NF-3)}' \
         | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
         | grep -vE '^(|-)$' \
@@ -3236,7 +3185,7 @@ show_help() {
     cat << 'EOF'
 
 ═══════════════════════════════════════════════════════════════════
-F2B UNIFIED WRAPPER v0.31
+F2B UNIFIED WRAPPER v0.33
 Fail2Ban + nftables Complete Management
 ═══════════════════════════════════════════════════════════════════
 
@@ -3325,6 +3274,14 @@ EOF
 ################################################################################
 
 main() {
+    # Help does not need the root-owned log or the Fail2Ban control socket.
+    case "${1:-}" in
+        ""|help|--help|-h)
+            show_help
+            return 0
+            ;;
+    esac
+
     # Initialize log file
     mkdir -p "$(dirname "$LOGFILE")"
     touch "$LOGFILE"
@@ -3451,5 +3408,3 @@ main() {
 }
 
 main "$@"
-
-

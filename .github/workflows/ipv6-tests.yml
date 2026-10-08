@@ -1,0 +1,16 @@
+name: IPv6 regression tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  ipv6:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables
+      - name: Shell syntax
+        run: bash -n releases/v0.33/scripts/f2b-wrapper-v033.sh && bash -n releases/v0.33/scripts/f2b-docker-hook.sh && bash -n releases/v0.33/scripts/03-install-wrapper-v033.sh
+      - run: /usr/bin/python3 releases/v0.33/tests/test_wrapper.py
+      - run: /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py
+      - name: Real nftables in disposable network namespace
+        run: sudo unshare --net /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py --net

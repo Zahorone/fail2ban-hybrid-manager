@@ -60,6 +60,9 @@ case "$MODE" in
     log_line "HOOK-BAN"
     ;;
   unban)
+    # Keep a shared IPv6 ban until the runtime union has been checked.
+    # Do not query Fail2Ban here: this hook runs inside its action worker.
+    if [[ "$IP" == *:* ]]; then log_line "HOOK-UNBAN-DEFERRED"; exit 0; fi
     # delete (ignore if missing)
     nft delete element "$TABLE_FAMILY" "$TABLE_NAME" "$SETNAME" "{ $IP }" 2>/dev/null || true
     log_line "HOOK-UNBAN"
@@ -69,4 +72,3 @@ case "$MODE" in
     exit 2
     ;;
 esac
-
