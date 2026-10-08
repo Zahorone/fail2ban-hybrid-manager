@@ -19,6 +19,10 @@ test gates have passed.
 - Attack reporting can omit configured service health probes. Reporting rules
   require source CIDR, method, host, status and exact path; they do not change
   Fail2Ban filters or bans.
+- An optional, separately invoked Easy!Appointments Apache module can deny the
+  private Composer vendor tree, protect storage directories and constrain
+  script-like uploads. The main installer never enables it automatically; see
+  `docs/EASYAPPOINTMENTS-APACHE-HARDENING.md`.
 
 ## Trusted reporting probes
 

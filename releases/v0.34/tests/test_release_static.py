@@ -46,4 +46,19 @@ assert 'run("systemctl", "restart", "nftables")' not in upgrade
 main_installer = (ROOT / "INSTALL-ALL-v034.sh").read_text()
 assert "Existing installation detected" in main_installer
 
+easy = (ROOT / "scripts/easyappointments-apache-hardening.py").read_text()
+assert "easyappointments-apache-hardening.py" not in main_installer
+assert 'default=Path("/var/www/html/easyappointments")' in easy
+assert 'default="http://127.0.0.1:8080"' in easy
+assert 'run("apache2ctl", "configtest")' in easy
+assert 'run("systemctl", "reload", "apache2")' in easy
+assert "restore_backup(backup)" in easy
+assert "harmless hardening test marker" in easy
+assert 'Path("/etc/apache2/conf-available")' in easy
+
+storage_hardening = (ROOT / "apache/easyappointments-private-storage.conf").read_text()
+assert "Options -Indexes -ExecCGI" in storage_hardening
+assert r"php[0-9]*|phtml|phar|cgi|pl|py|sh" in storage_hardening
+assert "/assets/vendor" not in storage_hardening
+
 print("PASS: v0.34 static safety and integration checks")

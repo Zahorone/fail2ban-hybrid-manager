@@ -18,6 +18,10 @@ Development candidate; not approved for production deployment.
 - Added reporting-only service-probe exclusions requiring source CIDR, method,
   host, status and exact path. These exclusions never modify bans.
 - Removed site-specific public addresses from release defaults.
+- Added an opt-in transactional Apache hardening workflow for confirmed
+  Easy!Appointments installations. It preserves existing managed-file and
+  symlink state, rejects unknown configuration, verifies the loopback backend,
+  and rolls back automatically on failure.
 
 ### Tests
 
@@ -26,5 +30,6 @@ Development candidate; not approved for production deployment.
 - Trusted-probe positive and negative scope tests.
 - Binary nginx log mail evidence and benign PHP-error tests.
 - Static checks forbidding global `flush ruleset`.
+- Optional Easy!Appointments scope, refusal and backup/restore tests.
 
 The historical v0.33 changelog remains in `releases/v0.33/docs/CHANGELOG.md`.
