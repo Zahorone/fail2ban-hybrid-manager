@@ -24,6 +24,13 @@ It provides full IPv4/IPv6 dual-stack protection with critical Docker-block impr
 - ✅ **Clean install support** – works on fresh servers without existing Fail2Ban
 - 🔄 **Auto-sync cron** – Docker containers stay protected automatically
 
+## IPv6 maintenance patch
+
+The source tree includes fixes for premature IPv6 Docker unbans, IPv4-only
+recidive actions, and wrapper IPv6 diagnostics. See
+[the patch and upgrade notes](releases/v0.33/docs/IPV6-FIX.md). Existing v0.33
+release downloads do not contain these source changes.
+
 ## Releases
 
 - **v0.33** (Latest) ⭐ **PHP Error Detection & Docker Auto-Sync**: 
