@@ -1,4 +1,4 @@
-name: IPv6 regression tests
+name: v0.34 release regression tests
 on: [push, pull_request]
 permissions:
   contents: read
@@ -7,10 +7,24 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables
+      - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables shellcheck
       - name: Shell syntax
-        run: bash -n releases/v0.33/scripts/f2b-wrapper-v033.sh && bash -n releases/v0.33/scripts/f2b-docker-hook.sh && bash -n releases/v0.33/scripts/03-install-wrapper-v033.sh
-      - run: /usr/bin/python3 releases/v0.33/tests/test_wrapper.py
-      - run: /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py
+        run: find releases/v0.34 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: ShellCheck errors
+        run: find releases/v0.34 -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+      - name: Python syntax
+        env:
+          PYTHONPYCACHEPREFIX: /tmp/f2b-pycache
+        run: /usr/bin/python3 -m compileall -q releases/v0.34/scripts releases/v0.34/tests
+      - name: Static release safety
+        run: /usr/bin/python3 releases/v0.34/tests/test_release_static.py
+      - name: Wrapper regression tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_wrapper.py
+      - name: Reporting scope tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
+      - name: PHP filter and binary-log mail tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
+      - name: IPv6 parser tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py
       - name: Real nftables in disposable network namespace
-        run: sudo unshare --net /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py --net
+        run: sudo unshare --net /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py --net
