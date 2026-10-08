@@ -61,4 +61,15 @@ assert "Options -Indexes -ExecCGI" in storage_hardening
 assert r"php[0-9]*|phtml|phar|cgi|pl|py|sh" in storage_hardening
 assert "/assets/vendor" not in storage_hardening
 
+exploit_filter = (ROOT / "filters/f2b-exploit-critical.conf").read_text()
+exploit_jail = (ROOT / "config/exploit-critical-rce.local").read_text()
+assert exploit_filter.count("ignoreregex =") == 1
+assert "%%%%32%%65" in exploit_filter
+assert "request:" in exploit_filter
+assert "maxretry = 1" in exploit_jail
+assert "bantime = 31536000" in exploit_jail
+assert "/opt/rustnpm/data/logs/*_error.log tail" in exploit_jail
+assert "99-exploit-critical-rce.local" in upgrade
+assert "99-exploit-critical-rce.local" in installer
+
 print("PASS: v0.34 static safety and integration checks")

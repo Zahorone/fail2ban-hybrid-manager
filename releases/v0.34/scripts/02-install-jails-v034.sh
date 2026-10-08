@@ -195,6 +195,13 @@ if [ -f "$CONFIG_DIR/recidive-mail.local" ]; then
   log_success "Installed recidive evidence mail action"
 fi
 
+if [ -f "$CONFIG_DIR/exploit-critical-rce.local" ]; then
+  sudo install -o root -g root -m 0644 \
+    "$CONFIG_DIR/exploit-critical-rce.local" \
+    /etc/fail2ban/jail.d/99-exploit-critical-rce.local
+  log_success "Installed critical RCE jail policy and error-log coverage"
+fi
+
 echo ""
 
 ################################################################################

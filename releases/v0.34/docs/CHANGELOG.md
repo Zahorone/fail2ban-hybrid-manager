@@ -22,6 +22,10 @@ Development candidate; not approved for production deployment.
   Easy!Appointments installations. It preserves existing managed-file and
   symlink state, rejects unknown configuration, verifies the loopback backend,
   and rolls back automatically on failure.
+- Added request-target-scoped CGI traversal and PHP-CGI argument-injection RCE
+  detection to `f2b-exploit-critical` for NPM access logs and nginx warning/error
+  logs. The managed jail override applies a one-year ban on the first match and
+  tails newly added error logs without replaying historical entries.
 
 ### Tests
 
@@ -31,5 +35,7 @@ Development candidate; not approved for production deployment.
 - Binary nginx log mail evidence and benign PHP-error tests.
 - Static checks forbidding global `flush ruleset`.
 - Optional Easy!Appointments scope, refusal and backup/restore tests.
+- Twenty malicious access/error fixtures across IPv4 and IPv6 plus thirteen
+  benign cases, including payload text present only in the referrer.
 
 The historical v0.33 changelog remains in `releases/v0.33/docs/CHANGELOG.md`.

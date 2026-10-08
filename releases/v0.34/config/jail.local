@@ -107,6 +107,7 @@ enabled  = true
 port     = http,https
 logpath  = /opt/rustnpm/data/logs/fallback_access.log
            /opt/rustnpm/data/logs/proxy-host-*_access.log
+           /opt/rustnpm/data/logs/*_error.log tail
 backend  = polling
 maxretry = 1
 findtime = 600

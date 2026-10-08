@@ -23,6 +23,10 @@ test gates have passed.
   private Composer vendor tree, protect storage directories and constrain
   script-like uploads. The main installer never enables it automatically; see
   `docs/EASYAPPOINTMENTS-APACHE-HARDENING.md`.
+- `f2b-exploit-critical` recognizes precise CGI traversal-to-shell and PHP-CGI
+  `allow_url_include` plus `auto_prepend_file=php://input` requests in both NPM
+  access logs and nginx error logs. One match receives a 365-day ban; historical
+  error logs are registered with `tail` to prevent replay.
 
 ## Trusted reporting probes
 
