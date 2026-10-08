@@ -10,6 +10,7 @@ Contents:
 - binary-safe nginx/PHP evidence mail override
 - reporting-only trusted service probe filter
 - regression tests for IPv6, reporting scope, PHP matching and static safety
+- transactional v0.33 preflight, upgrade and rollback tool
 
 Required before release:
 - clean Ubuntu 24.04 install test

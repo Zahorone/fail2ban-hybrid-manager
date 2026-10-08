@@ -37,4 +37,13 @@ assert 'grep -v "172.18.0.1"' not in wrapper
 assert "404 (scanner probes)" not in wrapper
 assert "Active attack in progress" not in wrapper
 
+upgrade = (ROOT / "scripts/upgrade-v033-v034.py").read_text()
+assert 'Path("/etc/fail2ban/jail.local")' not in upgrade.split("def install_map", 1)[1].split("def file_mode", 1)[0]
+assert 'Path("/etc/nftables.conf")' not in upgrade.split("def install_map", 1)[1].split("def file_mode", 1)[0]
+assert 'run("systemctl", "restart", "docker")' not in upgrade
+assert 'run("systemctl", "restart", "nftables")' not in upgrade
+
+main_installer = (ROOT / "INSTALL-ALL-v034.sh").read_text()
+assert "Existing installation detected" in main_installer
+
 print("PASS: v0.34 static safety and integration checks")

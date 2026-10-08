@@ -161,6 +161,10 @@ info "Installation Type: $INSTALLTYPE"
 echo ""
 echo ""
 
+if [ "$MODE" != "cleanup-only" ] && [ "$INSTALLTYPE" != "fresh" ]; then
+  error "Existing installation detected. Use: sudo python3 scripts/upgrade-v033-v034.py (preflight first); the clean installer will not modify this host."
+fi
+
 ################################################################################
 # INSTALLATION TYPE DESCRIPTION
 ################################################################################

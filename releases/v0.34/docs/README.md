@@ -36,3 +36,5 @@ only by path or User-Agent.
 
 The main installer and migration workflow remain under development. Do not run
 them on a production server from this branch.
+
+The preflight, apply and rollback command reference is in `docs/RECOVERY.md`.

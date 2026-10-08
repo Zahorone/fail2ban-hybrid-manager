@@ -22,6 +22,8 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_wrapper.py
       - name: Reporting scope tests
         run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
+      - name: Upgrade transaction unit tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
       - name: PHP filter and binary-log mail tests
         run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
       - name: IPv6 parser tests
