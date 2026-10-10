@@ -22,6 +22,7 @@ assert set(mapping) == {
     pathlib.Path("/usr/local/bin/f2b"),
     pathlib.Path("/usr/local/sbin/f2b-ipv6-sync.py"),
     pathlib.Path("/usr/local/sbin/f2b-docker-hook"),
+    pathlib.Path("/usr/local/libexec/f2b-runtime-verify.py"),
 }
 assert all(source.is_file() for source in mapping.values())
 assert pathlib.Path("/etc/fail2ban/jail.local") not in mapping

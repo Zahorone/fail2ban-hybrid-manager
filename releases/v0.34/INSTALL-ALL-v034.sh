@@ -170,6 +170,10 @@ if [ "$MODE" != "cleanup-only" ] && [ "$INSTALLTYPE" != "fresh" ]; then
   error "Existing installation detected. Use: sudo python3 scripts/upgrade-v033-v034.py (preflight first); the clean installer will not modify this host."
 fi
 
+if [ -f /etc/nftables.conf ] && grep -Eq '^[[:space:]]*flush[[:space:]]+ruleset([[:space:]]|$)' /etc/nftables.conf; then
+  error "Unsafe global flush in /etc/nftables.conf. Review boot persistence before installation; no cleanup has run."
+fi
+
 ################################################################################
 # INSTALLATION TYPE DESCRIPTION
 ################################################################################

@@ -33,6 +33,7 @@ SYSTEM_BACKUP_PATHS = (
     Path("usr/local/sbin/f2b-docker-hook"),
     Path("usr/local/sbin/f2b-ipv6-sync.py"),
     Path("usr/local/libexec/f2b-report-filter.py"),
+    Path("usr/local/libexec/f2b-runtime-verify.py"),
     Path("etc/f2b"),
     Path("var/lib/fail2ban"),
 )
@@ -73,7 +74,7 @@ def install_map(root: Path) -> dict[Path, Path]:
         mapping[Path("/etc/fail2ban/filter.d") / source.name] = source
     # Never deploy *.local action files: those are site configuration. The
     # production preflight verifies their effective result instead.
-    for name in ("nftables-recidive.conf",):
+    for name in ("nftables-recidive.conf", "nftables-multiport.conf"):
         mapping[Path("/etc/fail2ban/action.d") / name] = root / "actions" / name
     mapping.update(
         {
@@ -85,6 +86,7 @@ def install_map(root: Path) -> dict[Path, Path]:
             Path("/usr/local/sbin/f2b-docker-hook"): root / "scripts/f2b-docker-hook.sh",
             Path("/usr/local/sbin/f2b-ipv6-sync.py"): root / "scripts/f2b-ipv6-sync.py",
             Path("/usr/local/libexec/f2b-report-filter.py"): root / "scripts/f2b-report-filter.py",
+            Path("/usr/local/libexec/f2b-runtime-verify.py"): root / "scripts/upgrade-v034dev-canary-227c393.py",
             Path("/etc/f2b/reporting.ini.example"): root / "config/reporting.ini.example",
             Path("/etc/systemd/system/nftables.service.d/90-f2b-preserve-runtime.conf"):
                 root / "config/nftables-preserve-runtime.conf",
@@ -269,9 +271,7 @@ def create_backup(
             relative = database.relative_to("/")
             destination = Path(temporary) / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
-                with sqlite3.connect(destination) as target:
-                    source.backup(target)
+            backup_sqlite(database, destination)
             run("tar", "-rpf", str(backup / "system-files.tar"), "-C", temporary, str(relative))
     (backup / "manifest.json").write_text(
         json.dumps({"release": RELEASE, "paths": existing}, indent=2) + "\n"
@@ -290,6 +290,12 @@ def create_backup(
             checksums.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
     (backup / "SHA256SUMS").write_text("\n".join(checksums) + "\n")
     return backup
+
+
+def backup_sqlite(database: Path, destination: Path) -> None:
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
+        with sqlite3.connect(destination) as target:
+            source.backup(target)
 
 
 def verify_backup(backup: Path) -> None:
@@ -370,6 +376,17 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     verify_backup(backup)
     mapping = mapping or install_map(package_root())
     bans = json.loads((backup / "fail2ban-bans.json").read_text())
+    # Include bans acquired since preflight wherever the original jail survives.
+    # A removed new jail's bans move to the existing allports fallback jail.
+    try:
+        fresh = snapshot_bans()
+    except UpgradeError:
+        fresh = {}  # Recovery must still work when the daemon is unavailable.
+    fallback = "manualblock" if "manualblock" in bans else "recidive" if "recidive" in bans else None
+    for jail, addresses in fresh.items():
+        destination = jail if jail in bans else fallback
+        if destination is not None:
+            bans[destination] = sorted(set(bans[destination]) | set(addresses))
     # Restoring SQLite files requires stopping Fail2Ban, never Docker/nftables.
     run("systemctl", "stop", "fail2ban")
     restore_files(backup, mapping)
@@ -391,9 +408,16 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     multiport = Path("/etc/fail2ban/action.d/nftables-multiport.conf")
     multiport_text = multiport.read_text(errors="replace") if multiport.is_file() else ""
     if "before = nftables.conf" not in multiport_text or "type = multiport" not in multiport_text:
-        raise UpgradeError("Active nftables-multiport.conf is not the upstream family-aware shim")
+        # The unmodified v0.33 bundle used a fixed IPv4-only action. Migrate
+        # that exact known file; unknown site-edited actions require review.
+        legacy_digest = "d62391daee1c28514c3dd8e64940683645d0ee7e3c757a4819875a7146d6140b"
+        if hashlib.sha256(multiport.read_bytes()).hexdigest() != legacy_digest:
+            raise UpgradeError("Unknown local nftables-multiport.conf; review migration before apply")
     if run("fail2ban-client", "ping").stdout.strip() != "Server replied: pong":
         raise UpgradeError("Fail2Ban is not responding")
+    database = run("fail2ban-client", "get", "dbfile").stdout.strip()
+    if database not in {"None", "", "/var/lib/fail2ban/fail2ban.sqlite3"}:
+        raise UpgradeError("Custom Fail2Ban dbfile requires an explicit backup plan: " + database)
     if re.search(
         r"^\s*flush\s+ruleset(?:\s|$)",
         Path("/etc/nftables.conf").read_text(errors="replace"),

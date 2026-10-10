@@ -222,6 +222,8 @@ install -o root -g root -m 0755 "$SCRIPT_DIR/f2b-ipv6-sync.py" /usr/local/sbin/f
 [ -f "$SCRIPT_DIR/f2b-report-filter.py" ] || error "Missing f2b-report-filter.py"
 mkdir -p /usr/local/libexec /etc/f2b
 install -o root -g root -m 0755 \
+  "$SCRIPT_DIR/upgrade-v034dev-canary-227c393.py" /usr/local/libexec/f2b-runtime-verify.py
+install -o root -g root -m 0755 \
   "$SCRIPT_DIR/f2b-report-filter.py" /usr/local/libexec/f2b-report-filter.py
 
 # Never overwrite site-specific trusted source addresses during an upgrade.

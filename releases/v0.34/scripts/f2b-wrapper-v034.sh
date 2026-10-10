@@ -283,6 +283,10 @@ get_f2b_count() {
 # wrapper-ipv6-fix-20261008
 ipv6_set_for_jail() {
   local jail="$1" candidate
+  if [ -f /usr/local/libexec/f2b-runtime-verify.py ]; then
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-runtime-verify.py --set-name "$jail" 6
+    return
+  fi
   # The standard nftables action uses addr6-set; recidive uses a managed set.
   if [[ "$jail" == recidive ]]; then
     printf '%s\n' f2b-recidive-v6; return
@@ -293,6 +297,15 @@ ipv6_set_for_jail() {
     fi
   done
   return 1
+}
+
+ipv4_set_for_jail() {
+  local jail="$1"
+  if [ -f /usr/local/libexec/f2b-runtime-verify.py ]; then
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-runtime-verify.py --set-name "$jail" 4
+  else
+    printf '%s\n' "${SETMAP[$jail]}"
+  fi
 }
 
 canonical_ips() {
@@ -520,7 +533,7 @@ EOF
           missing_v6=0
 
           for jail in "${JAILS[@]}"; do
-            setname="${SETMAP[$jail]}"
+            setname="$(ipv4_set_for_jail "$jail")"
             [ -z "${setname}" ] && continue
 
             if sudo nft list set inet fail2ban-filter "${setname}" >/dev/null 2>&1; then
@@ -683,7 +696,7 @@ f2b_find() {
       bantime=$(sudo fail2ban-client get "$jail" bantime 2>/dev/null || echo "unknown")
       log_info "Ban time: $bantime"
 
-      local nftset="${SETMAP[$jail]}"
+      local nftset="$(ipv4_set_for_jail "$jail")"
       if [ -z "$nftset" ]; then
         log_warn "nftables: No set mapping for jail '$jail' (SETMAP missing)"
       else
@@ -758,7 +771,7 @@ f2b_sync_check() {
   local ALLSYNCED=true
 
   for jail in "${JAILS[@]}"; do
-    local nftset="${SETMAP[$jail]}"
+    local nftset="$(ipv4_set_for_jail "$jail")"
 
     # F2B counts (v4/v6)
     local F4 F6
@@ -1448,7 +1461,7 @@ manage_unban_all() {
 
     for jail in "${JAILS[@]}"; do
         local nftset
-        nftset="${SETMAP[$jail]}"
+        nftset="$(ipv4_set_for_jail "$jail")"
         [ -z "$nftset" ] && continue
 
         if sudo nft list set $F2BTABLE "$nftset" 2>/dev/null | grep -q "$ip"; then
@@ -1587,7 +1600,7 @@ monitor_show_bans() {
                 # Zobraz IPs s metadata ak je jq dostupné
                 if jq_check_installed; then
                     local nftset
-                    nftset="${SETMAP[$j]}"
+                    nftset="$(ipv4_set_for_jail "$j")"
                     sudo nft --json list set inet fail2ban-filter "$nftset" 2>/dev/null \
                         | jq -r '.nftables[] | select(.set.elem) | .set.elem[] | select(.elem)
                             | "  \(.elem.val), timeout: \(.elem.timeout // "permanent"), expires: \(.elem.expires // "never")"' 2>/dev/null \
@@ -1609,7 +1622,7 @@ monitor_show_bans() {
 
             if jq_check_installed; then
                 local nftset
-                nftset="${SETMAP[$jail]}"
+                nftset="$(ipv4_set_for_jail "$jail")"
                 sudo nft --json list set inet fail2ban-filter "$nftset" 2>/dev/null \
                     | jq -r '.nftables[] | select(.set.elem) | .set.elem[] | select(.elem)
                         | "  \(.elem.val), timeout: \(.elem.timeout // "permanent"), expires: \(.elem.expires // "never")"' 2>/dev/null \

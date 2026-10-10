@@ -4,6 +4,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 import subprocess
+import sqlite3
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -80,6 +81,22 @@ with tempfile.TemporaryDirectory() as directory:
         pass
     else:
         raise AssertionError("Corrupt backup passed checksum verification")
+
+# A live WAL-backed database must produce an independently readable snapshot,
+# including committed WAL rows and excluding an uncommitted transaction.
+with tempfile.TemporaryDirectory() as directory:
+    database = pathlib.Path(directory) / "live.sqlite3"
+    destination = pathlib.Path(directory) / "backup.sqlite3"
+    with sqlite3.connect(database) as writer:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("CREATE TABLE bans (ip TEXT)")
+        writer.execute("INSERT INTO bans VALUES ('192.0.2.8')")
+        writer.commit()
+        writer.execute("INSERT INTO bans VALUES ('2001:db8::8')")
+        module.backup_sqlite(database, destination)
+        with sqlite3.connect(destination) as reader:
+            assert reader.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            assert reader.execute("SELECT ip FROM bans").fetchall() == [("192.0.2.8",)]
 
 # The standard upgrade must run the canary verifier inside the transaction.
 # Inject a verifier failure after reload and require automatic rollback with

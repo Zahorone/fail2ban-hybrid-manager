@@ -59,3 +59,5 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py
       - name: Real nftables in disposable network namespace
         run: sudo unshare --net /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py --net
+      - name: Real Fail2Ban actions in disposable mount and network namespaces
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_live_actions.py

@@ -36,7 +36,9 @@ def install_map(root, system_root=Path("/")):
            "sweep": "etc/fail2ban/filter.d/f2b-webshell-sweep.conf",
            "jail": "etc/fail2ban/jail.d/99-webshell-sweep.local", "wrapper": "usr/local/bin/f2b",
            "sync": "usr/local/sbin/f2b-ipv6-sync.py", "hook": "usr/local/sbin/f2b-docker-hook"}
-    return {system_root/path: src[name] for name, path in dst.items()}
+    mapping={system_root/path: src[name] for name, path in dst.items()}
+    mapping[system_root/"usr/local/libexec/f2b-runtime-verify.py"]=Path(__file__).resolve()
+    return mapping
 
 def validate_payload(root):
     src = sources(root)
@@ -100,6 +102,8 @@ def production_preflight(root):
     if missing: raise UpgradeError("Missing commands: "+", ".join(missing))
     if not Path("/etc/fail2ban/jail.local").is_file(): raise UpgradeError("Missing jail.local")
     if run("fail2ban-client","ping").stdout.strip()!="Server replied: pong": raise UpgradeError("Fail2Ban unavailable")
+    database=run("fail2ban-client","get","dbfile").stdout.strip()
+    if database not in {"None","","/var/lib/fail2ban/fail2ban.sqlite3"}: raise UpgradeError("Custom dbfile requires an explicit backup plan")
     if run("/usr/local/bin/f2b","version","--short").stdout.strip()!=RELEASE: raise UpgradeError("Not a v0.34-dev host")
     validate_payload(root)
     with tempfile.TemporaryDirectory(prefix="f2b-canary-") as tmp:
@@ -113,7 +117,8 @@ def production_preflight(root):
 
 def backup_paths(root):
     return [root/"etc/fail2ban",root/"var/lib/fail2ban",root/"usr/local/bin/f2b",
-            root/"usr/local/sbin/f2b-docker-hook",root/"usr/local/sbin/f2b-ipv6-sync.py"]
+            root/"usr/local/sbin/f2b-docker-hook",root/"usr/local/sbin/f2b-ipv6-sync.py",
+            root/"usr/local/libexec/f2b-runtime-verify.py"]
 
 def create_backup(base,root,bans,nft):
     out=base/f"{BACKUP_LABEL}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"; out.mkdir(parents=True,mode=0o700)
@@ -145,7 +150,7 @@ def atomic_install(source,target):
     target.parent.mkdir(parents=True,exist_ok=True); fd,name=tempfile.mkstemp(prefix=".canary-",dir=target.parent); staged=Path(name)
     try:
         with os.fdopen(fd,"wb") as out,source.open("rb") as inp: shutil.copyfileobj(inp,out); out.flush(); os.fsync(out.fileno())
-        os.chmod(staged,0o755 if "/usr/local/bin/" in str(target) or "/usr/local/sbin/" in str(target) else 0o644); os.replace(staged,target)
+        os.chmod(staged,0o755 if any(p in str(target) for p in ("/usr/local/bin/","/usr/local/sbin/","/usr/local/libexec/")) else 0o644); os.replace(staged,target)
     finally: staged.unlink(missing_ok=True)
 
 def deploy(mapping):
@@ -272,6 +277,13 @@ def verify_live(root,bans,before):
 
 def rollback(backup,mapping,root,fixture=False):
     verify_backup(backup); bans=json.loads((backup/"fail2ban-bans.json").read_text())
+    if not fixture:
+        try: fresh=snapshot_bans()
+        except UpgradeError: fresh={}
+        fallback="manualblock" if "manualblock" in bans else "recidive" if "recidive" in bans else None
+        for jail,addresses in fresh.items():
+            destination=jail if jail in bans else fallback
+            if destination is not None: bans[destination]=sorted(set(bans[destination])|set(addresses))
     if not fixture: run("systemctl","stop","fail2ban")
     restore_files(backup,mapping,root)
     if not fixture:
@@ -288,11 +300,21 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__); mode=parser.add_mutually_exclusive_group()
     mode.add_argument("--apply",action="store_true"); mode.add_argument("--rollback",type=Path)
     mode.add_argument("--verify-only",action="store_true",help="read-only runtime and Docker membership checks")
+    mode.add_argument("--set-name",nargs=2,metavar=("JAIL","FAMILY"),help="resolve the effective nft set for wrapper diagnostics")
     parser.add_argument("--backup-dir",type=Path,default=Path("/var/backups/f2b-v034-canary"))
     parser.add_argument("--fixture-root",type=Path,help=argparse.SUPPRESS); args=parser.parse_args()
     root=package_root(); fixture=args.fixture_root is not None; system_root=args.fixture_root.resolve() if fixture else Path("/")
     mapping=install_map(root,system_root)
     try:
+        if args.set_name:
+            jail,family=args.set_name
+            if family not in {"4","6"}: raise UpgradeError("Family must be 4 or 6")
+            if jail=="recidive": print("f2b-recidive"+("-v6" if family=="6" else ""))
+            else:
+                resolved=effective_nft_actions(jail)
+                if int(family) not in resolved: raise UpgradeError("No effective nft action for jail")
+                print(resolved[int(family)][0])
+            return 0
         if args.verify_only:
             if fixture: raise UpgradeError("--verify-only requires the live system")
             if os.geteuid()!=0: raise UpgradeError("Run with sudo")
