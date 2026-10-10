@@ -17,8 +17,8 @@ def build(output):
     repo = root.parents[1]
     def git(*args):
         return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
-    if git('status', '--porcelain'):
-        raise RuntimeError('Build only from a clean committed checkout')
+    if git('status', '--porcelain', '--untracked-files=no'):
+        raise RuntimeError('Build only from a clean committed tracked checkout')
     commit = git('rev-parse', 'HEAD')
     spec = importlib.util.spec_from_file_location('upgrade', root / 'scripts/upgrade-v033-v034.py')
     module = importlib.util.module_from_spec(spec)
@@ -26,6 +26,10 @@ def build(output):
     mapping = module.install_map(root)
     files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py',
              root / 'docs/UPGRADE-v033-v034.md'}
+    for source in files:
+        relative = str(source.relative_to(repo))
+        if git('hash-object', relative) != git('rev-parse', 'HEAD:' + relative):
+            raise RuntimeError('Payload is not the committed HEAD: ' + relative)
     known = {}
     for target, source in mapping.items():
         previous = root.parent / 'v0.33' / source.relative_to(root)

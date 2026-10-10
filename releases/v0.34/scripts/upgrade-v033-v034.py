@@ -541,6 +541,8 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
         raise UpgradeError(f"Invalid backup directory: {backup}")
     verify_backup(backup)
     manifest = json.loads((backup / "manifest.json").read_text())
+    if manifest.get("schema") != 1 or not isinstance(manifest.get("targets"), list) or not isinstance(manifest.get("members"), list):
+        raise UpgradeError("Incompatible backup manifest; no rollback changes made")
     mapping = {Path(p): Path(p) for p in manifest["targets"]}
     bans = json.loads((backup / "fail2ban-bans.json").read_text())
     # Include bans acquired since preflight wherever the original jail survives.
@@ -605,7 +607,7 @@ def validate_multiport(multiport: Path) -> None:
 
 
 def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str]], dict]:
-    require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar"))
+    require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar", "/usr/bin/python3", "/usr/bin/flock", "/usr/bin/logger"))
     if not Path("/etc/fail2ban/jail.local").is_file():
         raise UpgradeError("Missing /etc/fail2ban/jail.local")
     validate_multiport(Path("/etc/fail2ban/action.d/nftables-multiport.conf"))
