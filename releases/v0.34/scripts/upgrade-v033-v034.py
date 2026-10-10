@@ -401,11 +401,7 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     assert_bans_preserved(bans)
 
 
-def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str]], dict]:
-    require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar"))
-    if not Path("/etc/fail2ban/jail.local").is_file():
-        raise UpgradeError("Missing /etc/fail2ban/jail.local")
-    multiport = Path("/etc/fail2ban/action.d/nftables-multiport.conf")
+def validate_multiport(multiport: Path) -> None:
     multiport_text = multiport.read_text(errors="replace") if multiport.is_file() else ""
     if "before = nftables.conf" not in multiport_text or "type = multiport" not in multiport_text:
         # The unmodified v0.33 bundle used a fixed IPv4-only action. Migrate
@@ -413,6 +409,13 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
         legacy_digest = "d62391daee1c28514c3dd8e64940683645d0ee7e3c757a4819875a7146d6140b"
         if hashlib.sha256(multiport.read_bytes()).hexdigest() != legacy_digest:
             raise UpgradeError("Unknown local nftables-multiport.conf; review migration before apply")
+
+
+def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str]], dict]:
+    require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar"))
+    if not Path("/etc/fail2ban/jail.local").is_file():
+        raise UpgradeError("Missing /etc/fail2ban/jail.local")
+    validate_multiport(Path("/etc/fail2ban/action.d/nftables-multiport.conf"))
     if run("fail2ban-client", "ping").stdout.strip() != "Server replied: pong":
         raise UpgradeError("Fail2Ban is not responding")
     database = run("fail2ban-client", "get", "dbfile").stdout.strip()

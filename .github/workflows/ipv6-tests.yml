@@ -55,6 +55,20 @@ jobs:
           sudo /usr/bin/fail2ban-client -c "$candidate" -t
       - name: PHP filter and binary-log mail tests
         run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
+      - name: Real merged v0.33 upgrade configuration
+        run: |
+          candidate="$(mktemp -d)"
+          cp -a /etc/fail2ban/. "$candidate/"
+          cp releases/v0.33/config/jail.local "$candidate/jail.local"
+          cp releases/v0.33/actions/*.local "$candidate/action.d/"
+          cp releases/v0.34/filters/*.conf "$candidate/filter.d/"
+          cp releases/v0.34/actions/nftables-multiport.conf releases/v0.34/actions/nftables-recidive.conf "$candidate/action.d/"
+          cp releases/v0.34/actions/docker-sync-hook.conf "$candidate/action.d/"
+          cp releases/v0.34/config/exploit-critical-rce.local "$candidate/jail.d/99-exploit-critical-rce.local"
+          cp releases/v0.34/config/webshell-sweep.local "$candidate/jail.d/99-webshell-sweep.local"
+          cp releases/v0.34/config/php-errors-mail.local "$candidate/jail.d/99-php-errors-mail.local"
+          cp releases/v0.34/config/recidive-mail.local "$candidate/jail.d/99-recidive-mail.local"
+          sudo /usr/bin/fail2ban-client -c "$candidate" -t
       - name: IPv6 parser tests
         run: /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py
       - name: Real nftables in disposable network namespace

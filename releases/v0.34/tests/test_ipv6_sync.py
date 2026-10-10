@@ -114,3 +114,17 @@ for ip, name in [('192.0.2.1', 'docker-banned-ipv4'), (address, 'docker-banned-i
     helper.hook_ban(ip, '-1')
     assert helper.readset('docker-block', name)[ip] > time.time() + 29 * 86400
 print('PASS: real IPv4/IPv6 hook longest expiry and permanent lease')
+
+# Legacy auto-merge sets may encode adjacent addresses as ranges/prefixes.
+# Keep the active address and remove only its unbanned neighbour atomically.
+helper.nft('add', 'set', 'inet', 'docker-block', 'legacy-interval-ipv4',
+           '{ type ipv4_addr; flags interval, timeout; auto-merge; timeout 7d; }')
+helper.nft('add', 'element', 'inet', 'docker-block', 'legacy-interval-ipv4',
+           '{ 192.0.2.8-192.0.2.9 timeout 7200s }')
+interval = helper.readset('docker-block', 'legacy-interval-ipv4')
+assert interval.ranges and set(interval) == {'192.0.2.8', '192.0.2.9'}
+helper.snapshot = lambda *args: ({'192.0.2.8': time.time() + 3600}, {})
+helper.reconcile({'192.0.2.8': time.time() + 3600}, 'docker-block', 'legacy-interval-ipv4')
+remaining = helper.readset('docker-block', 'legacy-interval-ipv4')
+assert set(remaining) == {'192.0.2.8'} and remaining['192.0.2.8'] > time.time() + 7100
+print('PASS: atomic legacy interval split preserves longest active expiry')

@@ -55,6 +55,18 @@ assert pathlib.Path("/etc/nftables.conf") not in mapping
 assert pathlib.Path("/usr/local/bin/f2b") in mapping
 assert pathlib.Path("/etc/fail2ban/jail.d/99-webshell-sweep.local") in mapping
 assert pathlib.Path("/etc/fail2ban/filter.d/f2b-webshell-sweep.conf") in mapping
+assert pathlib.Path("/etc/fail2ban/action.d/nftables-multiport.conf") in mapping
+module.validate_multiport(ROOT.parent / "v0.33/actions/nftables-multiport.conf")
+module.validate_multiport(ROOT / "actions/nftables-multiport.conf")
+with tempfile.TemporaryDirectory() as directory:
+    custom = pathlib.Path(directory) / "custom.conf"
+    custom.write_text("[Definition]\nactionban = custom-site-command\n")
+    try:
+        module.validate_multiport(custom)
+    except module.UpgradeError:
+        pass
+    else:
+        raise AssertionError("Unknown local action silently replaced")
 
 with tempfile.TemporaryDirectory() as directory:
     directory = pathlib.Path(directory)

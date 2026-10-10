@@ -158,7 +158,7 @@ def deploy(mapping):
 
 def restore_files(backup,mapping,root):
     json.loads((backup/"manifest.json").read_text())
-    # Remove all four managed targets first. The full archive restores every
+    # Remove all managed targets first. The full archive restores every
     # target that existed before apply; targets introduced by the canary stay
     # absent, which is required for an exact rollback.
     for target in mapping: target.unlink(missing_ok=True)

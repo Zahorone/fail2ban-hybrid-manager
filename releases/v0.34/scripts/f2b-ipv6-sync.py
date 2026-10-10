@@ -59,9 +59,13 @@ def nft(*args, check=True):
     )
 
 
+class AddressSet(dict):
+    ranges = False
+
+
 def readset(table, name):
     document = json.loads(nft('-j', 'list', 'set', 'inet', table, name).stdout)
-    output = {}
+    output = AddressSet()
     for obj in document['nftables']:
         if 'set' not in obj:
             continue
@@ -70,16 +74,46 @@ def readset(table, name):
             if isinstance(element, dict) and 'elem' in element:
                 expiry = element['elem'].get('expires')
                 element = element['elem']['val']
-            if not isinstance(element, str):
+            if isinstance(element, str):
+                addresses = [ipaddress.ip_address(element)]
+            elif isinstance(element, dict) and 'prefix' in element:
+                prefix = element['prefix']
+                network = ipaddress.ip_network(str(prefix['addr']) + '/' + str(prefix['len']), strict=False)
+                if network.num_addresses > 65536:
+                    raise RuntimeError('Unsupported interval size in ' + name + '; preserving all bans')
+                addresses = network
+                output.ranges = True
+            elif isinstance(element, dict) and 'range' in element:
+                first, last = map(ipaddress.ip_address, element['range'])
+                if first.version != last.version or not 0 <= int(last) - int(first) < 65536:
+                    raise RuntimeError('Unsupported interval size in ' + name + '; preserving all bans')
+                addresses = (ipaddress.ip_address(value) for value in range(int(first), int(last) + 1))
+                output.ranges = True
+            else:
                 raise RuntimeError('Unsupported interval in ' + name + '; preserving all bans')
-            output[str(ipaddress.ip_address(element))] = (
-                float('inf') if expiry is None else time.time() + expiry
-            )
+            for address in addresses:
+                output[str(address)] = float('inf') if expiry is None else time.time() + expiry
     return output
 
 
 def reconcile(desired, table, name, prune=True):
     current = readset(table, name)
+    if current.ranges:
+        # Individual deletes cannot split nft interval elements reliably. Build
+        # the active union in one atomic transaction on this owned set only.
+        if prune:
+            fresh, recidive = snapshot(6 if name.endswith(('ipv6', '-v6')) else 4)
+            desired = recidive if name.startswith('f2b-recidive') else fresh
+        else:
+            desired = {**current, **{ip: max(current.get(ip, 0), end) for ip, end in desired.items()}}
+        commands = ['flush set inet ' + table + ' ' + name]
+        for address, end in desired.items():
+            end = max(current.get(address, 0), end)
+            target = time.time() + 30 * 86400 if end == float('inf') else end
+            commands.append('add element inet ' + table + ' ' + name + ' { ' + address +
+                            ' timeout ' + str(max(1, int(target - time.time()))) + 's }')
+        subprocess.run(['nft', '-f', '-'], input='\n'.join(commands)+'\n', text=True, check=True, capture_output=True)
+        return
     # Extend shorter bans to the longest active jail expiry, without shortening others.
     for address, end in desired.items():
         # timeout 0 inherits a set default on these kernels. Maintain permanent
