@@ -33,6 +33,38 @@ assert '"restart", "nftables"' not in source
 assert module.TARGET_CHANGESET == "227c393"
 assert module.BACKUP_LABEL == "v034dev-to-227c393"
 
+# A newly enabled zero-ban jail uses actionstart-on-demand: rendered actions
+# are valid even though neither runtime nft set exists immediately after reload.
+class Result:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout, self.stderr, self.returncode = stdout, "", returncode
+
+commands = []
+def fake_run(*args, check=True):
+    commands.append(args)
+    tail = args[1:]
+    if tail == ("get", module.JAIL, "actions"):
+        return Result("Actions:\nnftables-multiport\nnftables-multiport-v6\ndocker-sync-hook\n")
+    if tail[-1:] == ("actionban",):
+        suffix = "-v6" if args[-2] == "nftables-multiport-v6" else ""
+        return Result(f"nft add element inet fail2ban-filter addr-set-{module.JAIL}{suffix} {{ <ip> }}\n")
+    if tail[-1:] == ("actionstart",):
+        suffix = "-v6" if args[-2] == "nftables-multiport-v6" else ""
+        return Result(f"nft add set inet fail2ban-filter addr-set-{module.JAIL}{suffix}\n")
+    if tail[:4] == ("list", "set", "inet", "fail2ban-filter"):
+        return Result(returncode=1)
+    if tail == ("get", module.JAIL, "banip"):
+        return Result("")
+    if tail == ("list", "chain", "inet", "fail2ban-filter", "f2b-input"):
+        return Result("")
+    raise AssertionError(args)
+
+real_run = module.run
+module.run = fake_run
+rendered = module.verify_nft_lifecycle(module.JAIL)
+assert set(rendered) == {f"addr-set-{module.JAIL}", f"addr-set-{module.JAIL}-v6"}
+module.run = real_run
+
 # Exercise the exact minimal-package layout through preflight, apply and rollback
 # without touching the host or invoking Fail2Ban/nftables.
 with tempfile.TemporaryDirectory() as directory:

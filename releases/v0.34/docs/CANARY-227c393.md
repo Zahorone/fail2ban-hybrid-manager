@@ -30,7 +30,12 @@ sudo python3 scripts/upgrade-v034dev-canary-227c393.py --apply
 Before installation, the script creates a complete timestamped backup below
 `/var/backups/f2b-v034-canary/`. It atomically installs the four managed files,
 reloads Fail2Ban, restores any missing active bans, checks the hello-world IOC,
-the new jail policy, IPv4/IPv6 nft sets and rules, and the Docker-block sync.
+the new jail policy, effective IPv4/IPv6 nft action definitions, and the
+Docker-block sync. Fail2Ban starts nft actions on demand, so a newly loaded jail
+with zero bans may legitimately have no runtime set yet. In that state the
+updater verifies the rendered `actionstart` and `actionban` commands without
+creating a synthetic ban. If the jail already has a ban, both runtime sets and
+their chain references are required.
 Any failed step automatically restores the backup.
 
 ## Manual rollback

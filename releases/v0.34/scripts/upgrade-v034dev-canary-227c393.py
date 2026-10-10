@@ -152,6 +152,43 @@ def scalar(jail,setting):
     if not found: raise UpgradeError(f"Cannot read {jail}.{setting}")
     return found.group(1)
 
+def action_names(jail):
+    output=run("fail2ban-client","get",jail,"actions").stdout
+    names=[]
+    for line in output.splitlines()[1:]:
+        name=line.strip().lstrip("|`- ").strip()
+        if name and " " not in name: names.append(name)
+    return names
+
+def effective_nft_actions(jail):
+    """Return rendered set names and start commands without starting actions."""
+    rendered={}
+    for action in action_names(jail):
+        ban=run("fail2ban-client","get",jail,"action",action,"actionban",check=False)
+        start=run("fail2ban-client","get",jail,"action",action,"actionstart",check=False)
+        if ban.returncode or start.returncode: continue
+        for name in re.findall(r"nft\s+add\s+element\s+inet\s+fail2ban-filter\s+([A-Za-z0-9_.:-]+)",ban.stdout):
+            rendered[name]=start.stdout
+    return rendered
+
+def verify_nft_lifecycle(jail):
+    rendered=effective_nft_actions(jail)
+    if len(rendered)!=2 or not any(name.endswith("-v6") for name in rendered) or not any(not name.endswith("-v6") for name in rendered):
+        raise UpgradeError(f"Cannot resolve both effective nft set names: {sorted(rendered)}")
+    active_bans=[x for x in run("fail2ban-client","get",jail,"banip").stdout.split() if valid_ip(x)]
+    chain=run("nft","list","chain","inet","fail2ban-filter","f2b-input").stdout
+    for name,start in rendered.items():
+        live=run("nft","list","set","inet","fail2ban-filter",name,check=False)
+        if live.returncode:
+            # Fail2Ban starts nft actions on demand. A clean jail after reload
+            # legitimately has no set until its first real ban.
+            if active_bans: raise UpgradeError(f"Active jail is missing nft set {name}")
+            if name not in start or "nft add set" not in start:
+                raise UpgradeError(f"Lazy nft action cannot create {name}")
+        elif f"@{name}" not in chain:
+            raise UpgradeError(f"Live nft set {name} is not referenced by f2b-input")
+    return rendered
+
 def verify_live(root,bans,before):
     run("fail2ban-client","-t"); run("fail2ban-client","ping"); restore_bans(bans)
     if nft_digest(nft_json())!=nft_digest(before): raise UpgradeError("External nftables table changed")
@@ -159,11 +196,9 @@ def verify_live(root,bans,before):
     for key,value in {"findtime":"30","maxretry":"3","bantime":"31536000"}.items():
         if scalar(JAIL,key)!=value: raise UpgradeError(f"Bad {key}")
     if "this_is_a_new_hello_world" not in run("fail2ban-client","get","f2b-exploit-critical","failregex").stdout: raise UpgradeError("IOC inactive")
-    for name in (JAIL,JAIL+"-v6"): run("nft","list","set","inet","fail2ban-filter",name)
-    chain=run("nft","list","chain","inet","fail2ban-filter","f2b-input").stdout
-    for rule in (f"ip saddr @{JAIL}",f"ip6 saddr @{JAIL}-v6"):
-        if rule not in chain: raise UpgradeError(f"Missing {rule}")
-    if "docker-sync-hook" not in run("fail2ban-client","get",JAIL,"actions").stdout: raise UpgradeError("Docker hook inactive")
+    actions=action_names(JAIL)
+    if "docker-sync-hook" not in actions: raise UpgradeError("Docker hook inactive")
+    verify_nft_lifecycle(JAIL)
     run("/usr/local/bin/f2b","sync","docker"); validate_payload(root)
 
 def rollback(backup,mapping,root,fixture=False):
