@@ -101,6 +101,13 @@ failure, never an automatic rewrite of the foreign ruleset.
 
 ## Validation limits / release gates
 
+Historical pristine v0.33 (`a88bacb`) has an unescaped-percent PHP filter that
+fails Fail2Ban 1.0.2 configuration parsing. That baseline is tested for safe
+refusal and validity of the merged candidate, NOT a successful runtime upgrade.
+Repair the current configuration explicitly before upgrading: a non-restartable
+original cannot be a safe rollback target. The full runtime transaction test
+uses v0.33 with the repository's recognized repairs (`0.33-ipv6.1`).
+
 Unit and namespace integration tests are not a full VM boot/reboot or a real
 Docker NAT/client-traffic test. No final release is authorized by green CI.
 Existing v0.34-dev live canary is separate evidence; IPv6 was not active

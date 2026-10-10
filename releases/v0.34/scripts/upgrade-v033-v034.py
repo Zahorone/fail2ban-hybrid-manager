@@ -635,6 +635,9 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar", "/usr/bin/python3", "/usr/bin/flock", "/usr/bin/logger"))
     if not Path("/etc/fail2ban/jail.local").is_file():
         raise UpgradeError("Missing /etc/fail2ban/jail.local")
+    current = run("fail2ban-client", "-t", check=False)
+    if current.returncode:
+        raise UpgradeError("Current configuration cannot be restarted safely for rollback; repair before upgrade:\n" + current.stdout + current.stderr)
     validate_multiport(Path("/etc/fail2ban/action.d/nftables-multiport.conf"))
     if run("fail2ban-client", "ping").stdout.strip() != "Server replied: pong":
         raise UpgradeError("Fail2Ban is not responding")

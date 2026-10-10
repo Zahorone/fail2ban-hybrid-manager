@@ -116,6 +116,23 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     for family, name in (('ip', 'docker-banned-ipv4'), ('ip6', 'docker-banned-ipv6')):
         run('nft', 'add', 'rule', 'inet', 'docker-block', 'prerouting', family, 'saddr', '@' + name, 'drop')
     try:
+        if '--pristine' in sys.argv:
+            # The historical release itself has a known unescaped-% PHP filter
+            # and cannot start on 1.0.2. Do not pretend it is a working baseline.
+            current = run('fail2ban-client', '-t', check=False)
+            assert current.returncode != 0 and "'%' must be followed" in current.stderr
+            spec = importlib.util.spec_from_file_location('pristine_upgrade', script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            mapping = module.install_map(package)
+            module.validate_package(package, mapping)
+            module.audit_targets(package, mapping)
+            module.validate_candidate(package, mapping)
+            refused = run('/usr/bin/python3', str(script), check=False)
+            assert refused.returncode != 0 and 'cannot be restarted safely for rollback' in refused.stderr
+            assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
+            print('PASS: original v0.33 percent-format bug is fail-closed; complete merged upgrade configuration is valid; no successful pristine runtime upgrade claimed')
+            sys.exit(0)
         run('fail2ban-client', '-x', 'start')
         wait(lambda: run('fail2ban-client', 'ping', check=False).returncode == 0)
         for ip in ('192.0.2.8', '2001:db8::8'):

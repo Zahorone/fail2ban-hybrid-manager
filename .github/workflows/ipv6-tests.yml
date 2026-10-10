@@ -101,5 +101,5 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-complete-upgrade.tar.gz
       - name: Full legacy upgrade in disposable namespaces (simulated systemd and cron)
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py
-      - name: Pristine v0.33 upgrade in disposable namespaces (simulated systemd and cron)
+      - name: Pristine v0.33 known-invalid baseline refusal and merged configuration
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --pristine
