@@ -27,7 +27,9 @@ run("mount", "-t", "tmpfs", "tmpfs", "/run")
 pathlib.Path("/run/lock").mkdir()
 pathlib.Path("/usr/local/sbin").mkdir(parents=True, exist_ok=True)
 for source, target in (("f2b-ipv6-sync.py", "f2b-ipv6-sync.py"), ("f2b-docker-hook.sh", "f2b-docker-hook")):
-    shutil.copy2(ROOT / "scripts" / source, pathlib.Path("/usr/local/sbin") / target)
+    destination = pathlib.Path("/usr/local/sbin") / target
+    shutil.copy2(ROOT / "scripts" / source, destination)
+    destination.chmod(0o755)
 
 with tempfile.TemporaryDirectory() as temporary:
     temporary = pathlib.Path(temporary)
@@ -90,5 +92,8 @@ with tempfile.TemporaryDirectory() as temporary:
         run("/usr/bin/python3", "/usr/local/sbin/f2b-ipv6-sync.py")
         assert foreign == run("nft", "-s", "list", "table", "inet", "foreign-sentinel").stdout
         print("PASS: real Fail2Ban two-family lazy actions, shared hook/unban, permanent ban and foreign table preservation")
+    except Exception:
+        print((temporary / "daemon.log").read_text())
+        raise
     finally:
         if started: client("stop")
