@@ -391,6 +391,27 @@ def validate_effective_dump(dump: str) -> None:
             conflicts.append(f"[{jail}] docker-sync-hook: missing or customized ban command")
     php_mail = actions.get(("nginx-php-errors", "sendmail-whois-lines"), {})
     if "-a" not in php_mail.get("grepopts", "").split(): conflicts.append("[nginx-php-errors] mail: binary-safe grep option missing")
+    # Check the merged fail/ignore expressions, not just IOC presence. A local
+    # ignoreregex can otherwise silently neutralize every new protection.
+    host = r"(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f:]+)"
+    for jail, attack_path in (("f2b-exploit-critical", "/this_is_a_new_hello_world.php"),
+                              ("f2b-webshell-sweep", "/shell.php")):
+        expressions = {"addfailregex": [], "addignoreregex": []}
+        for command in commands:
+            if len(command) == 4 and command[0] in {"set", "multi-set"} and command[1] == jail and command[2] in expressions:
+                value = command[3]
+                expressions[command[2]].extend(value if isinstance(value, list) else [value])
+        try:
+            compiled = {key: [re.compile(value.replace("<HOST>", host)) for value in values] for key, values in expressions.items()}
+            def matches(line):
+                return any(p.search(line) for p in compiled["addfailregex"]) and not any(p.search(line) for p in compiled["addignoreregex"])
+            for address in ("192.0.2.7", "2001:db8::7"):
+                attack = f'[10/Oct/2026:12:00:00 +0200] - 404 404 - GET https example.invalid "{attack_path}" [Client {address}]'
+                if not matches(attack): conflicts.append(f"[{jail}] effective filter/ignoreregex suppresses synthetic IOC for {address}")
+            benign = '[10/Oct/2026:12:00:00 +0200] - 200 200 - GET https example.invalid "/wp-content/plugins/wp-file-manager/file_folder_manager.php" [Client 192.0.2.7]'
+            if matches(benign): conflicts.append(f"[{jail}] effective filter matches benign WordPress request")
+        except (re.error, TypeError) as error:
+            conflicts.append(f"[{jail}] cannot verify effective expressions: {error}")
     if conflicts: raise UpgradeError("Effective configuration conflicts; inspect jail.local, jail.d/*.local and filter/action *.local:\n" + "\n".join(conflicts))
 
 

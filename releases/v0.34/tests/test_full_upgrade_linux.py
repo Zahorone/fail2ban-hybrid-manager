@@ -122,6 +122,12 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
             run('fail2ban-client', 'set', 'manualblock', 'banip', ip)
         wait(lambda: '2001:db8::8' in run('fail2ban-client', 'get', 'manualblock', 'banip').stdout)
         command = ['/usr/bin/python3', str(script)]
+        conflict = Path('/etc/fail2ban/filter.d/f2b-exploit-critical.local')
+        conflict.write_text('[Definition]\nignoreregex = .*\n')
+        blocked = run(*command, check=False)
+        assert blocked.returncode != 0 and 'suppress' in blocked.stderr
+        assert conflict.read_text() == '[Definition]\nignoreregex = .*\n'
+        conflict.unlink()
         # Read-only preflight leaves existing site files/firewall unchanged.
         before = {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         result = run(*command)
