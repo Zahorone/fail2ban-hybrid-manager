@@ -43,6 +43,8 @@ jobs:
           cp releases/v0.34/config/nginx-recon-optimized.local "$candidate/filter.d/"
           cp releases/v0.34/config/f2b-anomaly-detection.local "$candidate/filter.d/"
           cp releases/v0.34/config/jail.local "$candidate/jail.local"
+          cp releases/v0.34/config/php-errors-mail.local "$candidate/jail.d/99-php-errors-mail.local"
+          cp releases/v0.34/config/recidive-mail.local "$candidate/jail.d/99-recidive-mail.local"
           sudo mkdir -p /opt/rustnpm/data/logs
           sudo touch \
             /opt/rustnpm/data/logs/fallback_access.log \

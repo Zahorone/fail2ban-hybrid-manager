@@ -38,6 +38,9 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     package = next((temporary / 'package').iterdir())
     script = package / 'scripts/upgrade-v033-v034.py'
     legacy = REPO / 'releases/v0.33'
+    private_etc = temporary / 'private-etc'
+    shutil.copytree('/etc', private_etc, symlinks=True)
+    run('mount', '--bind', str(private_etc), '/etc')
     # Clone just fixture-owned paths and bind them privately, never the host.
     for name in ('/etc/fail2ban', '/etc/nftables.d', '/etc/cron.d', '/etc/systemd/system',
                  '/usr/local', '/etc/f2b', '/var/lib/fail2ban', '/var/log', '/opt/rustnpm/data/logs'):
@@ -66,10 +69,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     for name in ('fallback_access.log', 'fallback_http_access.log', 'dead-host_access.log',
                  'proxy-host-1_access.log', 'fallback_error.log', 'proxy-host-1_error.log'):
         (Path('/opt/rustnpm/data/logs') / name).touch()
-    nft_config = temporary / 'nftables.conf'
+    nft_config = Path('/etc/nftables.conf')
     nft_config.write_text('flush ruleset\ninclude "/etc/nftables.d/fail2ban-filter.nft"\ninclude "/etc/nftables.d/docker-block.nft"\n')
-    if not Path('/etc/nftables.conf').exists(): Path('/etc/nftables.conf').touch()
-    run('mount', '--bind', str(nft_config), '/etc/nftables.conf')
     # Executable stubs model only daemon lifecycle/cron availability. No real
     # host service is stopped, started or daemon-reloaded in this namespace.
     stubs = temporary / 'bin'

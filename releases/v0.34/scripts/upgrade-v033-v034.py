@@ -357,7 +357,7 @@ def validate_effective_dump(dump: str) -> None:
                              ("f2b-webshell-sweep", "bantime", 31536000),
                              ("f2b-exploit-critical", "maxretry", 1),
                              ("f2b-exploit-critical", "bantime", 31536000)):
-        if settings.get((jail, key)) != value:
+        if str(settings.get((jail, key))) != str(value):
             conflicts.append(f"[{jail}] {key}: effective {settings.get((jail,key))!r}, required {value}")
     critical = [c[3] for c in commands if len(c) == 4 and c[0] in {"set", "multi-set"} and c[1:3] == ["f2b-exploit-critical", "addfailregex"]]
     if "this_is_a_new_hello_world" not in repr(critical): conflicts.append("[f2b-exploit-critical] failregex: new IOC missing")
@@ -441,6 +441,10 @@ def backup_sqlite(database: Path, destination: Path) -> None:
     with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
         with sqlite3.connect(destination) as target:
             source.backup(target)
+    shutil.copystat(database, destination)
+    if os.geteuid() == 0:
+        metadata = database.stat()
+        os.chown(destination, metadata.st_uid, metadata.st_gid)
 
 
 def verify_backup(backup: Path) -> None:
