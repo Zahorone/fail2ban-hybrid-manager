@@ -15,6 +15,10 @@ import time
 import sys
 from unittest.mock import patch
 
+# Importing the archived updater for fault injection must not add a .pyc to
+# the immutable package inventory before its own bytecode policy takes effect.
+sys.dont_write_bytecode = True
+
 REPO = Path(__file__).resolve().parents[3]
 
 
