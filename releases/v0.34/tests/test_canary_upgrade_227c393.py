@@ -14,6 +14,26 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
+standard_db = "/var/lib/fail2ban/fail2ban.sqlite3"
+assert module.validate_dbfile("Current database file is:\n`- /var/lib/fail2ban/fail2ban.sqlite3\n") == standard_db
+assert module.validate_dbfile(standard_db + "\n") == standard_db
+assert module.validate_dbfile("None\n") is None
+assert module.validate_dbfile("Current database file is:\n`- None\n") is None
+for output in ("/srv/custom.sqlite3", "Current database file is:\n`- /srv/custom.sqlite3\n"):
+    try:
+        module.validate_dbfile(output)
+    except module.UpgradeError as error:
+        assert "Custom dbfile" in str(error)
+    else:
+        raise AssertionError("Custom database escaped backup protection")
+for output in ("", "NOK: database unavailable", "Current database file is:\n", standard_db + "\nNone"):
+    try:
+        module.validate_dbfile(output)
+    except module.UpgradeError as error:
+        assert "Unrecognized" in str(error)
+    else:
+        raise AssertionError("Ambiguous database response was accepted")
+
 mapping = module.install_map(ROOT)
 assert set(mapping) == {
     pathlib.Path("/etc/fail2ban/filter.d/f2b-exploit-critical.conf"),

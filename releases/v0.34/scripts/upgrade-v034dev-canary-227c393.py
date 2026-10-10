@@ -62,6 +62,18 @@ def parse_jails(text):
         if "Jail list:" in line: return [x.strip() for x in line.split("Jail list:",1)[1].split(",") if x.strip()]
     return []
 
+def validate_dbfile(output):
+    """Accept a plain value or Fail2Ban 1.0.2's labelled tree output."""
+    value = output.strip()
+    formatted = re.fullmatch(r"Current database file is:\n[ \t]*[`|]-[ \t]+([^\r\n]+)", value)
+    if formatted: value = formatted[1].strip()
+    if value == "None": return None
+    if not re.fullmatch(r"/[^\r\n]+", value):
+        raise UpgradeError("Unrecognized Fail2Ban dbfile response")
+    if value != "/var/lib/fail2ban/fail2ban.sqlite3":
+        raise UpgradeError("Custom dbfile requires an explicit backup plan: " + value)
+    return value
+
 def valid_ip(value):
     try: ipaddress.ip_address(value); return True
     except ValueError: return False
@@ -102,8 +114,7 @@ def production_preflight(root):
     if missing: raise UpgradeError("Missing commands: "+", ".join(missing))
     if not Path("/etc/fail2ban/jail.local").is_file(): raise UpgradeError("Missing jail.local")
     if run("fail2ban-client","ping").stdout.strip()!="Server replied: pong": raise UpgradeError("Fail2Ban unavailable")
-    database=run("fail2ban-client","get","dbfile").stdout.strip()
-    if database not in {"None","","/var/lib/fail2ban/fail2ban.sqlite3"}: raise UpgradeError("Custom dbfile requires an explicit backup plan")
+    validate_dbfile(run("fail2ban-client","get","dbfile").stdout)
     if run("/usr/local/bin/f2b","version","--short").stdout.strip()!=RELEASE: raise UpgradeError("Not a v0.34-dev host")
     validate_payload(root)
     with tempfile.TemporaryDirectory(prefix="f2b-canary-") as tmp:

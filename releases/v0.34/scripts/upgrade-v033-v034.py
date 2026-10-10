@@ -401,6 +401,19 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     assert_bans_preserved(bans)
 
 
+def validate_dbfile(output):
+    """Accept a plain value or Fail2Ban 1.0.2's labelled tree output."""
+    value = output.strip()
+    formatted = re.fullmatch(r"Current database file is:\n[ \t]*[`|]-[ \t]+([^\r\n]+)", value)
+    if formatted: value = formatted[1].strip()
+    if value == "None": return None
+    if not re.fullmatch(r"/[^\r\n]+", value):
+        raise UpgradeError("Unrecognized Fail2Ban dbfile response")
+    if value != "/var/lib/fail2ban/fail2ban.sqlite3":
+        raise UpgradeError("Custom dbfile requires an explicit backup plan: " + value)
+    return value
+
+
 def validate_multiport(multiport: Path) -> None:
     multiport_text = multiport.read_text(errors="replace") if multiport.is_file() else ""
     if "before = nftables.conf" not in multiport_text or "type = multiport" not in multiport_text:
@@ -418,9 +431,7 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     validate_multiport(Path("/etc/fail2ban/action.d/nftables-multiport.conf"))
     if run("fail2ban-client", "ping").stdout.strip() != "Server replied: pong":
         raise UpgradeError("Fail2Ban is not responding")
-    database = run("fail2ban-client", "get", "dbfile").stdout.strip()
-    if database not in {"None", "", "/var/lib/fail2ban/fail2ban.sqlite3"}:
-        raise UpgradeError("Custom Fail2Ban dbfile requires an explicit backup plan: " + database)
+    validate_dbfile(run("fail2ban-client", "get", "dbfile").stdout)
     if re.search(
         r"^\s*flush\s+ruleset(?:\s|$)",
         Path("/etc/nftables.conf").read_text(errors="replace"),
