@@ -157,6 +157,11 @@ def hook_ban(address, bantime):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'export':
+        jails = dict(call(['status']))['Jail list']
+        if isinstance(jails, str): jails = [j.strip() for j in jails.split(',') if j.strip()]
+        print(json.dumps({jail: call(['get', jail, 'banip', '--with-time']) for jail in jails}))
+        return
     if len(sys.argv) > 1 and sys.argv[1] == 'hook-ban':
         hook_ban(sys.argv[2], sys.argv[3])
         return

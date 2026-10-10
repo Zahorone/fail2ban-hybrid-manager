@@ -134,6 +134,8 @@ with tempfile.TemporaryDirectory() as directory:
 # Inject a verifier failure after reload and require automatic rollback with
 # the exact backup and original deployment map.
 with patch.object(module, "require_root"), \
+     patch.object(module, "acquire_upgrade_lock"), \
+     patch.object(module, "prepare_persistence"), \
      patch.object(module, "preflight", return_value=({"sshd": ["192.0.2.8"]}, base)), \
      patch.object(module, "create_backup", return_value=pathlib.Path("/fixture/backup")), \
      patch.object(module, "deploy"), \

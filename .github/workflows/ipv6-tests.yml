@@ -24,6 +24,8 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
       - name: Upgrade transaction unit tests
         run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
+      - name: Complete upgrade conflict and rollback tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_upgrade_package.py
       - name: Canary 227c393 transaction scope tests
         run: /usr/bin/python3 releases/v0.34/tests/test_canary_upgrade_227c393.py
       - name: Optional Easy!Appointments Apache hardening tests
@@ -53,6 +55,22 @@ jobs:
             /var/log/fail2ban.log \
             /var/log/fail2ban-blocked-ips.txt
           sudo /usr/bin/fail2ban-client -c "$candidate" -t
+          sudo /usr/bin/fail2ban-client -c "$candidate" -d > /tmp/f2b-upgrade-candidate.dump
+          /usr/bin/python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('upgrade', 'releases/v0.34/scripts/upgrade-v033-v034.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          dump = Path('/tmp/f2b-upgrade-candidate.dump').read_text()
+          module.validate_effective_dump(dump)
+          try:
+              module.validate_effective_dump(dump.replace("'maxretry', 3", "'maxretry', 99"))
+          except module.UpgradeError as error:
+              assert 'maxretry' in str(error)
+          else:
+              raise AssertionError('An effective override conflict was accepted')
+          PY
       - name: PHP filter and binary-log mail tests
         run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
       - name: Real merged v0.33 upgrade configuration
@@ -75,3 +93,7 @@ jobs:
         run: sudo unshare --net /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py --net
       - name: Real Fail2Ban actions in disposable mount and network namespaces
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_live_actions.py
+      - name: Build and verify complete upgrade archive
+        run: /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-complete-upgrade.tar.gz
+      - name: Full legacy upgrade in disposable namespaces (simulated systemd and cron)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py

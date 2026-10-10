@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as dt
+import fcntl
 import hashlib
 import importlib.util
 import ipaddress
@@ -16,8 +18,11 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 from typing import Iterable
+
+sys.dont_write_bytecode = True
 
 
 RELEASE = "0.34-dev"
@@ -36,6 +41,8 @@ SYSTEM_BACKUP_PATHS = (
     Path("usr/local/libexec/f2b-runtime-verify.py"),
     Path("etc/f2b"),
     Path("var/lib/fail2ban"),
+    Path("etc/cron.d/f2b-v034-sync"),
+    Path("usr/local/sbin/f2b-save-owned-tables.py"),
 )
 
 
@@ -58,6 +65,16 @@ def require_root() -> None:
         raise UpgradeError("Run with sudo; no changes made.")
 
 
+def acquire_upgrade_lock():
+    lock = open("/run/lock/f2b-upgrade.lock", "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        raise UpgradeError("Another upgrade/rollback or scheduled sync is running")
+    return lock
+
+
 def require_commands(commands: Iterable[str]) -> None:
     missing = [command for command in commands if shutil.which(command) is None]
     if missing:
@@ -74,7 +91,7 @@ def install_map(root: Path) -> dict[Path, Path]:
         mapping[Path("/etc/fail2ban/filter.d") / source.name] = source
     # Never deploy *.local action files: those are site configuration. The
     # production preflight verifies their effective result instead.
-    for name in ("nftables-recidive.conf", "nftables-multiport.conf"):
+    for name in ("nftables-recidive.conf", "nftables-multiport.conf", "docker-sync-hook.conf"):
         mapping[Path("/etc/fail2ban/action.d") / name] = root / "actions" / name
     mapping.update(
         {
@@ -87,6 +104,8 @@ def install_map(root: Path) -> dict[Path, Path]:
             Path("/usr/local/sbin/f2b-ipv6-sync.py"): root / "scripts/f2b-ipv6-sync.py",
             Path("/usr/local/libexec/f2b-report-filter.py"): root / "scripts/f2b-report-filter.py",
             Path("/usr/local/libexec/f2b-runtime-verify.py"): root / "scripts/upgrade-v034dev-canary-227c393.py",
+            Path("/usr/local/sbin/f2b-save-owned-tables.py"): root / "scripts/f2b-save-owned-tables.py",
+            Path("/etc/cron.d/f2b-v034-sync"): root / "config/upgrade-sync.cron",
             Path("/etc/f2b/reporting.ini.example"): root / "config/reporting.ini.example",
             Path("/etc/systemd/system/nftables.service.d/90-f2b-preserve-runtime.conf"):
                 root / "config/nftables-preserve-runtime.conf",
@@ -100,6 +119,7 @@ def file_mode(target: Path) -> int:
 
 
 def validate_package(root: Path, mapping: dict[Path, Path]) -> None:
+    verify_package_manifest(root)
     version = (root / "VERSION").read_text().strip()
     if version != RELEASE:
         raise UpgradeError(f"Package VERSION is {version!r}, expected {RELEASE!r}")
@@ -117,6 +137,72 @@ def validate_package(root: Path, mapping: dict[Path, Path]) -> None:
         if path.is_file() and path.suffix in {".sh", ".nft", ".conf", ".local"}:
             if re.search(r"^\s*flush\s+ruleset(?:\s|$)", path.read_text(errors="replace"), re.MULTILINE):
                 raise UpgradeError(f"Unsafe global flush found in package: {path}")
+
+
+def verify_package_manifest(root: Path) -> dict:
+    manifest_path = root / "UPGRADE-MANIFEST.json"
+    if not manifest_path.is_file():
+        raise UpgradeError("Use the complete built upgrade package: UPGRADE-MANIFEST.json is missing")
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("schema") != 1 or manifest.get("release") != RELEASE:
+        raise UpgradeError("Unsupported package manifest")
+    expected = manifest["files"]
+    actual = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
+    if actual != set(expected) | {"UPGRADE-MANIFEST.json", "SHA256SUMS"}:
+        raise UpgradeError("Package file inventory does not match manifest")
+    for name, digest in expected.items():
+        relative = Path(name)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise UpgradeError("Unsafe package path")
+        path = root / relative
+        if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise UpgradeError("Package checksum mismatch: " + name)
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        digest, name = line.split("  ", 1)
+        if name not in actual or hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
+            raise UpgradeError("Package SHA256SUMS mismatch: " + name)
+    return manifest
+
+
+def audit_targets(root: Path, mapping: dict[Path, Path]) -> None:
+    known = verify_package_manifest(root)["known_targets"]
+    conflicts = []
+    for target, source in mapping.items():
+        if target.is_symlink() or target.parent.resolve() != target.parent:
+            conflicts.append(str(target) + ": symlink target/parent requires manual review")
+        elif target.exists() and target.read_bytes() != source.read_bytes():
+            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            if digest not in known.get(str(target), []):
+                conflicts.append(str(target) + ": unknown local contents SHA256=" + digest)
+    if conflicts:
+        raise UpgradeError("Local target conflicts (nothing overwritten):\n" + "\n".join(conflicts))
+    print("PASS: managed target conflicts checked; other jail.local/*.local/whitelists remain unchanged")
+
+
+def sanitized_nft_config(text: str) -> str:
+    # Remove only the dangerous command created by the old installer. Never
+    # execute this file during upgrade, and preserve all other site statements.
+    return re.sub(r"^[ \t]*flush[ \t]+ruleset[ \t]*;?[ \t]*(?:#.*)?$",
+                  "# v0.34 upgrade: global ruleset flush removed", text, flags=re.MULTILINE)
+
+
+def prepare_persistence(mapping: dict[Path, Path], directory: Path) -> None:
+    path = Path("/etc/nftables.conf")
+    if not path.is_file(): raise UpgradeError("Missing /etc/nftables.conf")
+    text = sanitized_nft_config(path.read_text())
+    if re.search(r"\bflush\s+ruleset\b", re.sub(r"#.*", "", text)):
+        raise UpgradeError("Unrecognized global flush in /etc/nftables.conf; manual review required")
+    for table in sorted(OWNED_NFT_TABLES):
+        target = Path("/etc/nftables.d") / (table + ".nft")
+        if str(target) not in text and '/etc/nftables.d/*.nft' not in text:
+            raise UpgradeError("Missing persistence include for " + str(target))
+        # Save only our own live table; no foreign table or Docker NAT content.
+        destination = directory / target.name
+        destination.write_text(run("nft", "-s", "list", "table", "inet", table).stdout)
+        mapping[target] = destination
+    candidate = directory / "nftables.conf"
+    candidate.write_text(text)
+    mapping[path] = candidate
 
 
 def parse_jails(status: str) -> list[str]:
@@ -144,6 +230,14 @@ def snapshot_bans() -> dict[str, list[str]]:
         output = run("fail2ban-client", "get", jail, "banip").stdout
         snapshot[jail] = sorted({value for value in output.split() if valid_ip(value)})
     return snapshot
+
+
+def snapshot_ban_times() -> dict:
+    # Use typed socket responses via the distribution Python, not CLI cosmetics.
+    output = run("/usr/bin/python3", str(package_root() / "scripts/f2b-ipv6-sync.py"), "export").stdout
+    value = json.loads(output)
+    if not isinstance(value, dict): raise UpgradeError("Invalid timed ban snapshot")
+    return value
 
 
 def restore_missing_bans(snapshot: dict[str, list[str]]) -> None:
@@ -246,8 +340,54 @@ def validate_candidate(root: Path, mapping: dict[Path, Path]) -> None:
             shutil.copy2(source, destination)
         run("fail2ban-client", "-c", str(candidate), "-t")
         dump = run("fail2ban-client", "-c", str(candidate), "-d").stdout
-        if "f2b-recidive-v6" not in dump:
-            raise UpgradeError("Candidate does not resolve the IPv6 recidive set")
+        validate_effective_dump(dump)
+
+
+def validate_effective_dump(dump: str) -> None:
+    commands = []
+    for line in dump.splitlines():
+        if line.startswith("["):
+            try: commands.append(ast.literal_eval(line))
+            except (ValueError, SyntaxError): raise UpgradeError("Unrecognized Fail2Ban config dump")
+    settings = {(c[1], c[2]): c[3] for c in commands if len(c) == 4 and c[0] == "set"}
+    jails = {c[1] for c in commands if c[0] == "add"}
+    conflicts = []
+    for jail, key, value in (("f2b-webshell-sweep", "findtime", 30),
+                             ("f2b-webshell-sweep", "maxretry", 3),
+                             ("f2b-webshell-sweep", "bantime", 31536000),
+                             ("f2b-exploit-critical", "maxretry", 1),
+                             ("f2b-exploit-critical", "bantime", 31536000)):
+        if settings.get((jail, key)) != value:
+            conflicts.append(f"[{jail}] {key}: effective {settings.get((jail,key))!r}, required {value}")
+    critical = [c[3] for c in commands if len(c) == 4 and c[0] in {"set", "multi-set"} and c[1:3] == ["f2b-exploit-critical", "addfailregex"]]
+    if "this_is_a_new_hello_world" not in repr(critical): conflicts.append("[f2b-exploit-critical] failregex: new IOC missing")
+    actions = {(c[1], c[3]): dict(c[4]) for c in commands if len(c) == 5 and c[0] == "multi-set" and c[2] == "action"}
+    verifier = load_verifier()
+    verifier.action_names = lambda jail: [name for owner, name in actions if owner == jail]
+    def candidate_run(*args, **kwargs):
+        if args == ("fail2ban-client", "-d"): return subprocess.CompletedProcess(args, 0, dump, "")
+        if len(args) == 6 and args[:2] == ("fail2ban-client", "get") and args[3] == "action":
+            return subprocess.CompletedProcess(args, 0, actions[(args[2], args[4])][args[5]], "")
+        raise UpgradeError("Unexpected candidate verification command")
+    verifier.run = candidate_run
+    for jail in sorted(jails):
+        if jail == "recidive":
+            props = actions.get((jail, "nftables-recidive"), {})
+            if props.get("recidive_set") != "f2b-recidive" or props.get("recidive_set?family=inet6") != "f2b-recidive-v6":
+                conflicts.append("[recidive] action: both managed family sets are required")
+            continue
+        try:
+            if set(verifier.effective_nft_actions(jail)) != {4, 6}:
+                conflicts.append(f"[{jail}] action: missing IPv4/IPv6 nft action")
+        except Exception as error: conflicts.append(f"[{jail}] action: {error}")
+    if "recidive" not in jails: conflicts.append("[recidive] enabled: rollback fallback is required")
+    for jail in ("nginx-php-errors", "f2b-webshell-sweep", "f2b-exploit-critical"):
+        hook = actions.get((jail, "docker-sync-hook"), {})
+        if hook.get("actionban") != f"/usr/local/sbin/f2b-docker-hook ban <ip> {jail} <bantime>":
+            conflicts.append(f"[{jail}] docker-sync-hook: missing or customized ban command")
+    php_mail = actions.get(("nginx-php-errors", "sendmail-whois-lines"), {})
+    if "-a" not in php_mail.get("grepopts", "").split(): conflicts.append("[nginx-php-errors] mail: binary-safe grep option missing")
+    if conflicts: raise UpgradeError("Effective configuration conflicts; inspect jail.local, jail.d/*.local and filter/action *.local:\n" + "\n".join(conflicts))
 
 
 def create_backup(
@@ -256,7 +396,7 @@ def create_backup(
     nft_doc: dict,
     label: str = "v033-to-v034",
 ) -> Path:
-    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup = backup_base / f"{label}-{timestamp}"
     backup.mkdir(parents=True, mode=0o700)
     existing = [str(path) for path in SYSTEM_BACKUP_PATHS if (Path("/") / path).exists()]
@@ -273,12 +413,17 @@ def create_backup(
             destination.parent.mkdir(parents=True, exist_ok=True)
             backup_sqlite(database, destination)
             run("tar", "-rpf", str(backup / "system-files.tar"), "-C", temporary, str(relative))
-    (backup / "manifest.json").write_text(
-        json.dumps({"release": RELEASE, "paths": existing}, indent=2) + "\n"
-    )
+    with tarfile.open(backup / "system-files.tar") as archive:
+        members = [member.name for member in archive.getmembers()]
+    (backup / "manifest.json").write_text(json.dumps({"schema": 1, "release": RELEASE,
+        "paths": existing, "members": members, "targets": [str(p) for p in install_map(package_root())] +
+        ["/etc/nftables.conf", "/etc/nftables.d/fail2ban-filter.nft", "/etc/nftables.d/docker-block.nft"]}, indent=2) + "\n")
     (backup / "fail2ban-bans.json").write_text(json.dumps(bans, indent=2) + "\n")
+    (backup / "fail2ban-ban-times.json").write_text(json.dumps(snapshot_ban_times(), indent=2) + "\n")
     (backup / "nft-ruleset.json").write_text(json.dumps(nft_doc, indent=2) + "\n")
     (backup / "nft-ruleset.txt").write_text(run("nft", "-s", "list", "ruleset").stdout)
+    for table in sorted(OWNED_NFT_TABLES):
+        (backup / (table + ".nft")).write_text(run("nft", "-s", "list", "table", "inet", table).stdout)
     (backup / "fail2ban-dump.txt").write_text(run("fail2ban-client", "-d").stdout)
     (backup / "services.txt").write_text(
         run("systemctl", "is-active", "fail2ban", "nftables", "docker", check=False).stdout
@@ -333,7 +478,9 @@ def deploy(mapping: dict[Path, Path]) -> None:
 
 def restore_files(backup: Path, mapping: dict[Path, Path]) -> None:
     manifest = json.loads((backup / "manifest.json").read_text())
-    existed = {str(Path("/") / path) for path in manifest["paths"]}
+    # Top-level backup roots are not an inventory of their child files.
+    # Remove exactly new managed targets, including nested jail.d files.
+    existed = {str(Path("/") / path) for path in manifest["members"]}
     for target in mapping:
         if str(target) not in existed:
             target.unlink(missing_ok=True)
@@ -356,6 +503,21 @@ def verify_after(bans: dict[str, list[str]], before_nft: dict) -> None:
     if version != RELEASE:
         raise UpgradeError(f"Installed wrapper reports {version!r}, expected {RELEASE!r}")
     verify_release_runtime(bans, before_nft)
+    verifier = load_verifier()
+    for jail in parse_jails(run("fail2ban-client", "status").stdout):
+        if jail != "recidive": verifier.verify_nft_lifecycle(jail)
+    run("/usr/bin/python3", "/usr/local/sbin/f2b-save-owned-tables.py")
+    if external_nft_digest(nft_ruleset()) != external_nft_digest(before_nft):
+        raise UpgradeError("Foreign firewall changed after persistence")
+
+
+def load_verifier():
+    script = package_root() / "scripts/upgrade-v034dev-canary-227c393.py"
+    spec = importlib.util.spec_from_file_location("f2b_v034_runtime_checks", script)
+    if spec is None or spec.loader is None: raise UpgradeError("Cannot load runtime verifier")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    return verifier
 
 
 def verify_release_runtime(bans: dict[str, list[str]], before_nft: dict) -> None:
@@ -374,7 +536,8 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     if not backup.is_dir() or not (backup / "manifest.json").is_file():
         raise UpgradeError(f"Invalid backup directory: {backup}")
     verify_backup(backup)
-    mapping = mapping or install_map(package_root())
+    manifest = json.loads((backup / "manifest.json").read_text())
+    mapping = {Path(p): Path(p) for p in manifest["targets"]}
     bans = json.loads((backup / "fail2ban-bans.json").read_text())
     # Include bans acquired since preflight wherever the original jail survives.
     # A removed new jail's bans move to the existing allports fallback jail.
@@ -387,6 +550,8 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
         destination = jail if jail in bans else fallback
         if destination is not None:
             bans[destination] = sorted(set(bans[destination]) | set(addresses))
+        elif addresses:
+            raise UpgradeError("Cannot preserve new jail bans during rollback: " + jail)
     # Restoring SQLite files requires stopping Fail2Ban, never Docker/nftables.
     run("systemctl", "stop", "fail2ban")
     restore_files(backup, mapping)
@@ -395,10 +560,21 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
             sidecar.unlink(missing_ok=True)
     run("systemctl", "daemon-reload")
     run("fail2ban-client", "-t")
+    # Restore the original owned firewall, including IPv6 elements and local
+    # blocked ports, in one transaction. Never submit the full ruleset backup.
+    commands = []
+    for table in sorted(OWNED_NFT_TABLES):
+        if run("nft", "list", "table", "inet", table, check=False).returncode == 0:
+            commands.append("delete table inet " + table)
+        commands.append((backup / (table + ".nft")).read_text())
+    run("nft", "-f", "-", input_text="\n".join(commands) + "\n")
     run("systemctl", "start", "fail2ban")
     run("fail2ban-client", "ping")
     restore_missing_bans(bans)
     assert_bans_preserved(bans)
+    before = json.loads((backup / "nft-ruleset.json").read_text())
+    if external_nft_digest(nft_ruleset()) != external_nft_digest(before):
+        raise UpgradeError("Foreign firewall changed during rollback; not automatically overwritten")
 
 
 def validate_dbfile(output):
@@ -432,13 +608,19 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     if run("fail2ban-client", "ping").stdout.strip() != "Server replied: pong":
         raise UpgradeError("Fail2Ban is not responding")
     validate_dbfile(run("fail2ban-client", "get", "dbfile").stdout)
-    if re.search(
-        r"^\s*flush\s+ruleset(?:\s|$)",
-        Path("/etc/nftables.conf").read_text(errors="replace"),
-        re.MULTILINE,
-    ):
-        raise UpgradeError("/etc/nftables.conf contains global flush ruleset")
     validate_package(root, mapping)
+    audit_targets(root, mapping)
+    run("systemctl", "is-active", "--quiet", "cron")
+    version = run("/usr/local/bin/f2b", "version", "--short").stdout.strip().lstrip("v")
+    if version not in {"0.33", RELEASE}: raise UpgradeError("Unsupported installed wrapper version: " + version)
+    snapshot_ban_times()
+    with tempfile.TemporaryDirectory(prefix="f2b-persistence-preflight-") as temporary:
+        prepare_persistence(dict(mapping), Path(temporary))
+    cron = run("crontab", "-l", check=False).stdout
+    if re.search(r"(?m)^[^#\n]*(?:flush\s+ruleset|systemctl\s+(?:restart|reload)\s+(?:nftables|docker)|nft\s+-f)", cron):
+        raise UpgradeError("Root crontab contains a firewall reload/flush command; review it before apply")
+    for path in sorted(Path("/etc/fail2ban").rglob("*.local")):
+        if path not in mapping: print("PRESERVED local override: " + str(path))
     validate_live_firewall()
     validate_candidate(root, mapping)
     bans = snapshot_bans()
@@ -457,6 +639,11 @@ def main() -> int:
         require_root()
         root = package_root()
         mapping = install_map(root)
+        # Mutating modes exclude concurrent upgrades and the new cron job.
+        # Dry-run preflight does not create a lock or installed files.
+        operation_lock = None
+        if args.apply or args.rollback:
+            operation_lock = acquire_upgrade_lock()
         if args.rollback:
             rollback(args.rollback, mapping)
             print(f"PASS: rollback restored {args.rollback}")
@@ -469,7 +656,9 @@ def main() -> int:
         backup = create_backup(args.backup_dir, bans, before_nft)
         print(f"Backup complete: {backup}")
         try:
-            deploy(mapping)
+            with tempfile.TemporaryDirectory(prefix="f2b-persistence-") as temporary:
+                prepare_persistence(mapping, Path(temporary))
+                deploy(mapping)
             run("systemctl", "daemon-reload")
             run("fail2ban-client", "-t")
             run("fail2ban-client", "reload")
