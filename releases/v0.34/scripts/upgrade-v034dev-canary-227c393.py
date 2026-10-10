@@ -2,7 +2,7 @@
 """Transactional v0.34-dev canary update to changeset 227c393."""
 from __future__ import annotations
 
-import argparse, datetime as dt, hashlib, ipaddress, json, os, re, shutil, subprocess, sys, tarfile, tempfile
+import argparse, ast, datetime as dt, hashlib, ipaddress, json, os, re, shutil, subprocess, sys, tarfile, tempfile
 from pathlib import Path
 
 RELEASE = "0.34-dev"
@@ -156,38 +156,74 @@ def action_names(jail):
     output=run("fail2ban-client","get",jail,"actions").stdout
     names=[]
     for line in output.splitlines()[1:]:
-        name=line.strip().lstrip("|`- ").strip()
-        if name and " " not in name: names.append(name)
+        for item in line.strip().lstrip("|`- ").split(","):
+            name=item.strip()
+            if re.fullmatch(r"[A-Za-z0-9_.:-]+",name): names.append(name)
     return names
 
 def effective_nft_actions(jail):
-    """Return rendered set names and start commands without starting actions."""
+    """Resolve family properties from Fail2Ban's effective configuration dump."""
     rendered={}
-    for action in action_names(jail):
-        ban=run("fail2ban-client","get",jail,"action",action,"actionban",check=False)
-        start=run("fail2ban-client","get",jail,"action",action,"actionstart",check=False)
-        if ban.returncode or start.returncode: continue
-        for name in re.findall(r"nft\s+add\s+element\s+inet\s+fail2ban-filter\s+([A-Za-z0-9_.:-]+)",ban.stdout):
-            rendered[name]=start.stdout
+    live=set(action_names(jail))
+    for line in run("fail2ban-client","-d").stdout.splitlines():
+        if not line.startswith("["): continue
+        try: command=ast.literal_eval(line)
+        except (ValueError,SyntaxError): continue
+        if not isinstance(command,list) or len(command)!=5 or command[:3]!=["multi-set",jail,"action"]: continue
+        action=command[3]
+        if action not in live: continue
+        props=dict(command[4])
+        if "nft add element" not in props.get("actionban",""): continue
+        # Confirm the loaded runtime action uses the same command template.
+        runtime=run("fail2ban-client","get",jail,"action",action,"actionban").stdout.strip()
+        if runtime!=props["actionban"].strip(): raise UpgradeError("Runtime/config nft action mismatch")
+        for version,family in ((4,"inet4"),(6,"inet6")):
+            values={k:v for k,v in props.items() if "?" not in k}
+            values.update({k.split("?",1)[0]:v for k,v in props.items() if k.endswith("?family="+family)})
+            def expand(text):
+                for _ in range(12):
+                    updated=re.sub(r"<([A-Za-z0-9_]+)>",lambda m:str(values.get(m[1],m[0])),text)
+                    if updated==text: return text
+                    text=updated
+                raise UpgradeError("Recursive nft action property")
+            name=expand(str(values.get("addr_set","")))
+            if not re.fullmatch(r"[A-Za-z0-9_.:-]+",name): raise UpgradeError("Unresolved nft set name")
+            start=expand(props.get("actionstart","")); ban=expand(props["actionban"])
+            address_family="ip" if version==4 else "ip6"
+            address_type="ipv4_addr" if version==4 else "ipv6_addr"
+            if (f"nft add set inet fail2ban-filter {name}" not in start or
+                address_type not in start or f"{address_family} saddr @{name}" not in start or
+                f"nft add element inet fail2ban-filter {name}" not in ban):
+                raise UpgradeError(f"Invalid IPv{version} nft action")
+            rendered[version]=(name,start)
     return rendered
 
 def verify_nft_lifecycle(jail):
     rendered=effective_nft_actions(jail)
-    if len(rendered)!=2 or not any(name.endswith("-v6") for name in rendered) or not any(not name.endswith("-v6") for name in rendered):
+    if set(rendered)!={4,6} or rendered[4][0]==rendered[6][0]:
         raise UpgradeError(f"Cannot resolve both effective nft set names: {sorted(rendered)}")
     active_bans=[x for x in run("fail2ban-client","get",jail,"banip").stdout.split() if valid_ip(x)]
     chain=run("nft","list","chain","inet","fail2ban-filter","f2b-input").stdout
-    for name,start in rendered.items():
+    for version,(name,start) in rendered.items():
+        family_bans=[ip for ip in active_bans if ipaddress.ip_address(ip).version==version]
         live=run("nft","list","set","inet","fail2ban-filter",name,check=False)
         if live.returncode:
             # Fail2Ban starts nft actions on demand. A clean jail after reload
             # legitimately has no set until its first real ban.
-            if active_bans: raise UpgradeError(f"Active jail is missing nft set {name}")
+            if family_bans: raise UpgradeError(f"Active jail is missing nft set {name}")
             if name not in start or "nft add set" not in start:
                 raise UpgradeError(f"Lazy nft action cannot create {name}")
         elif f"@{name}" not in chain:
             raise UpgradeError(f"Live nft set {name} is not referenced by f2b-input")
+        for ip in family_bans:
+            run("nft","get","element","inet","fail2ban-filter",name,"{",ip,"}")
     return rendered
+
+def verify_docker_hook(jail):
+    if "docker-sync-hook" not in action_names(jail): raise UpgradeError("Docker hook inactive")
+    hook=run("fail2ban-client","get",jail,"action","docker-sync-hook","actionban").stdout.strip()
+    if hook!=f"/usr/local/sbin/f2b-docker-hook ban <ip> {jail} <bantime>":
+        raise UpgradeError("Unexpected Docker hook ban command")
 
 def verify_live(root,bans,before):
     run("fail2ban-client","-t"); run("fail2ban-client","ping"); restore_bans(bans)
@@ -196,10 +232,21 @@ def verify_live(root,bans,before):
     for key,value in {"findtime":"30","maxretry":"3","bantime":"31536000"}.items():
         if scalar(JAIL,key)!=value: raise UpgradeError(f"Bad {key}")
     if "this_is_a_new_hello_world" not in run("fail2ban-client","get","f2b-exploit-critical","failregex").stdout: raise UpgradeError("IOC inactive")
-    actions=action_names(JAIL)
-    if "docker-sync-hook" not in actions: raise UpgradeError("Docker hook inactive")
+    verify_docker_hook(JAIL)
     verify_nft_lifecycle(JAIL)
-    run("/usr/local/bin/f2b","sync","docker"); validate_payload(root)
+    run("/usr/local/bin/f2b","sync","docker")
+    # Reconcile only genuine live bans. The hook handles either address family
+    # independently of the wrapper's historical nft set naming conventions.
+    for jail,addresses in snapshot_bans().items():
+        if "docker-sync-hook" not in action_names(jail): continue
+        for ip in addresses:
+            name="docker-banned-ipv4" if ipaddress.ip_address(ip).version==4 else "docker-banned-ipv6"
+            query=("nft","get","element","inet","docker-block",name,"{",ip,"}")
+            if run(*query,check=False).returncode:
+                run("/usr/local/sbin/f2b-docker-hook","ban",ip,jail,scalar(jail,"bantime"))
+            run(*query)
+    if nft_digest(nft_json())!=nft_digest(before): raise UpgradeError("External nftables table changed during sync")
+    validate_payload(root)
 
 def rollback(backup,mapping,root,fixture=False):
     verify_backup(backup); bans=json.loads((backup/"fail2ban-bans.json").read_text()); restore_files(backup,mapping,root)

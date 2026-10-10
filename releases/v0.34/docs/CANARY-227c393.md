@@ -33,9 +33,14 @@ reloads Fail2Ban, restores any missing active bans, checks the hello-world IOC,
 the new jail policy, effective IPv4/IPv6 nft action definitions, and the
 Docker-block sync. Fail2Ban starts nft actions on demand, so a newly loaded jail
 with zero bans may legitimately have no runtime set yet. In that state the
-updater verifies the rendered `actionstart` and `actionban` commands without
-creating a synthetic ban. If the jail already has a ban, both runtime sets and
-their chain references are required.
+updater resolves the `actionstart` and `actionban` templates and family-specific
+properties from the effective configuration, then compares the ban template
+with the loaded runtime action. One action may handle both address families;
+set names are not assumed. A runtime set and its chain reference are required
+for each family with an active ban. No synthetic ban is created.
+The Docker hook must have the expected executable ban command. After wrapper
+synchronization, every live ban from a jail using that hook is checked in the
+corresponding Docker set; missing real bans are reconciled through the hook.
 Any failed step automatically restores the backup.
 
 ## Manual rollback

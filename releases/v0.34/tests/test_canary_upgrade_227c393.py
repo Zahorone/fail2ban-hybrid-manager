@@ -40,21 +40,30 @@ class Result:
         self.stdout, self.stderr, self.returncode = stdout, "", returncode
 
 commands = []
+active = ""
+hook_command = f"/usr/local/sbin/f2b-docker-hook ban <ip> {module.JAIL} <bantime>"
+props = {
+    "name": module.JAIL, "addr_set": "f2b-<name>",
+    "addr_set?family=inet6": "addr6-set-<name>",
+    "addr_type": "ipv4_addr", "addr_type?family=inet6": "ipv6_addr",
+    "addr_family": "ip", "addr_family?family=inet6": "ip6",
+    "actionban": "nft add element inet fail2ban-filter <addr_set> \\{ <ip> \\}",
+    "actionstart": "nft add set inet fail2ban-filter <addr_set> { type <addr_type>; }\nnft add rule inet fail2ban-filter f2b-input <addr_family> saddr @<addr_set> drop",
+}
 def fake_run(*args, check=True):
     commands.append(args)
     tail = args[1:]
     if tail == ("get", module.JAIL, "actions"):
-        return Result("Actions:\nnftables-multiport\nnftables-multiport-v6\ndocker-sync-hook\n")
+        return Result(f"The jail {module.JAIL} has the following actions:\nnftables-multiport, docker-sync-hook, sendmail-whois-lines\n")
+    if tail == ("-d",):
+        return Result(repr(["multi-set", module.JAIL, "action", "nftables-multiport", list(props.items())])+"\n")
     if tail[-1:] == ("actionban",):
-        suffix = "-v6" if args[-2] == "nftables-multiport-v6" else ""
-        return Result(f"nft add element inet fail2ban-filter addr-set-{module.JAIL}{suffix} {{ <ip> }}\n")
-    if tail[-1:] == ("actionstart",):
-        suffix = "-v6" if args[-2] == "nftables-multiport-v6" else ""
-        return Result(f"nft add set inet fail2ban-filter addr-set-{module.JAIL}{suffix}\n")
+        if args[-2] == "docker-sync-hook": return Result(hook_command+"\n")
+        return Result(props["actionban"]+"\n")
     if tail[:4] == ("list", "set", "inet", "fail2ban-filter"):
         return Result(returncode=1)
     if tail == ("get", module.JAIL, "banip"):
-        return Result("")
+        return Result(active)
     if tail == ("list", "chain", "inet", "fail2ban-filter", "f2b-input"):
         return Result("")
     raise AssertionError(args)
@@ -62,7 +71,25 @@ def fake_run(*args, check=True):
 real_run = module.run
 module.run = fake_run
 rendered = module.verify_nft_lifecycle(module.JAIL)
-assert set(rendered) == {f"addr-set-{module.JAIL}", f"addr-set-{module.JAIL}-v6"}
+assert module.action_names(module.JAIL) == ["nftables-multiport", "docker-sync-hook", "sendmail-whois-lines"]
+module.verify_docker_hook(module.JAIL)
+hook_command = ""
+try:
+    module.verify_docker_hook(module.JAIL)
+except module.UpgradeError as error:
+    assert "Unexpected Docker hook" in str(error)
+else:
+    raise AssertionError("Empty Docker hook was accepted")
+assert rendered[4][0] == f"f2b-{module.JAIL}"
+assert rendered[6][0] == f"addr6-set-{module.JAIL}"
+for active in ("192.0.2.8", "2001:db8::8"):
+    try:
+        module.verify_nft_lifecycle(module.JAIL)
+    except module.UpgradeError as error:
+        assert "missing nft set" in str(error)
+    else:
+        raise AssertionError("Missing set for a genuinely banned address was accepted")
+active = ""
 module.run = real_run
 
 # Exercise the exact minimal-package layout through preflight, apply and rollback
