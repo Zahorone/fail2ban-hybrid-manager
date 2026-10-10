@@ -104,7 +104,8 @@ def nft_digest(doc):
     kept=[]
     for item in doc.get("nftables",[]):
         data=next((v for k,v in item.items() if k!="metainfo"),None)
-        if isinstance(data,dict) and data.get("table") in {"fail2ban-filter","docker-block"}: continue
+        owner = (data.get("name") if "table" in item else data.get("table")) if isinstance(data,dict) else None
+        if isinstance(data,dict) and data.get("family")=="inet" and owner in {"fail2ban-filter","docker-block"}: continue
         if "metainfo" not in item: kept.append(stable(item))
     return hashlib.sha256(json.dumps(kept,sort_keys=True,separators=(",",":")).encode()).hexdigest()
 

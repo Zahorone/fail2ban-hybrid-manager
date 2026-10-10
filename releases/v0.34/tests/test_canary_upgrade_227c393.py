@@ -13,6 +13,8 @@ spec = importlib.util.spec_from_file_location("canary_227c393", SCRIPT)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+assert module.nft_digest({"nftables": [{"table": {"family": "inet", "name": "docker-block"}}]}) == module.nft_digest({"nftables": []})
+assert module.nft_digest({"nftables": [{"table": {"family": "ip", "name": "docker-block"}}]}) != module.nft_digest({"nftables": []})
 
 standard_db = "/var/lib/fail2ban/fail2ban.sqlite3"
 assert module.validate_dbfile("Current database file is:\n`- /var/lib/fail2ban/fail2ban.sqlite3\n") == standard_db

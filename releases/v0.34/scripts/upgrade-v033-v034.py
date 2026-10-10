@@ -289,7 +289,8 @@ def external_nft_digest(document: dict) -> str:
     kept = []
     for item in document.get("nftables", []):
         payload = next((value for key, value in item.items() if key != "metainfo"), None)
-        if isinstance(payload, dict) and payload.get("table") in OWNED_NFT_TABLES:
+        owner = (payload.get("name") if "table" in item else payload.get("table")) if isinstance(payload, dict) else None
+        if isinstance(payload, dict) and payload.get("family") == "inet" and owner in OWNED_NFT_TABLES:
             continue
         if "metainfo" not in item:
             kept.append(stable(item))

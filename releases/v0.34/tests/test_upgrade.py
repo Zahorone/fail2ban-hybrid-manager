@@ -65,6 +65,12 @@ counters_changed = {
     ]
 }
 assert module.external_nft_digest(base) == module.external_nft_digest(counters_changed)
+owned_reordered = {"nftables": [base["nftables"][0], *base["nftables"][3:],
+                               {"table": {"family": "inet", "name": "docker-block"}},
+                               *base["nftables"][1:3]]}
+assert module.external_nft_digest(base) == module.external_nft_digest(owned_reordered)
+foreign_same_name = {"nftables": [*base["nftables"], {"table": {"family": "ip", "name": "docker-block"}}]}
+assert module.external_nft_digest(base) != module.external_nft_digest(foreign_same_name)
 counters_changed["nftables"][-1]["rule"]["verdict"] = "drop"
 assert module.external_nft_digest(base) != module.external_nft_digest(counters_changed)
 
