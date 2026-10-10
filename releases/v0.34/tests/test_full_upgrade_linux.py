@@ -3,6 +3,7 @@
 systemd/cron are deliberately simulated: this is NOT a VM/reboot test.
 """
 import hashlib
+import contextlib
 import io
 import importlib.util
 import json
@@ -185,12 +186,18 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
             calls.append(target)
             if len(calls) == 3: raise OSError('namespace injected deployment failure')
             return actual_install(source, target)
-        with patch.object(module, 'atomic_install', side_effect=fail_third), \
+        failure_log = io.StringIO()
+        with contextlib.redirect_stderr(failure_log), \
+             patch.object(module, 'atomic_install', side_effect=fail_third), \
              patch.object(sys, 'argv', [str(script), '--apply', '--backup-dir', str(temporary / 'fault-backups')]):
             assert module.main() == 1
+        assert 'was rolled back' in failure_log.getvalue(), failure_log.getvalue()
+        assert 'ROLLBACK ALSO FAILED' not in failure_log.getvalue()
         assert len(calls) == 3
         assert not Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists()
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
+        restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
+        assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8', '192.0.2.99'))
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
     except Exception:
