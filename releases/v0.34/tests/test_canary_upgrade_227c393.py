@@ -68,7 +68,7 @@ def fake_run(*args, check=True):
     if tail == ("get", module.JAIL, "banip"):
         return Result(active)
     if tail == ("list", "chain", "inet", "fail2ban-filter", "f2b-input"):
-        return Result("")
+        return Result("", returncode=1)
     raise AssertionError(args)
 
 real_run = module.run
@@ -93,6 +93,18 @@ for active in ("192.0.2.8", "2001:db8::8"):
     else:
         raise AssertionError("Missing set for a genuinely banned address was accepted")
 active = ""
+base_run = module.run
+def orphan_set_run(*args, check=True):
+    if args[1:5] == ("list", "set", "inet", "fail2ban-filter"):
+        return Result("set exists")
+    return base_run(*args, check=check)
+module.run = orphan_set_run
+try:
+    module.verify_nft_lifecycle(module.JAIL)
+except module.UpgradeError as error:
+    assert "not referenced by f2b-input" in str(error)
+else:
+    raise AssertionError("An existing set without an input-chain reference was accepted")
 module.run = real_run
 
 # Read-only verification must report missing Docker members without executing

@@ -222,7 +222,9 @@ def verify_nft_lifecycle(jail):
     if set(rendered)!={4,6} or rendered[4][0]==rendered[6][0]:
         raise UpgradeError(f"Cannot resolve both effective nft set names: {sorted(rendered)}")
     active_bans=[x for x in run("fail2ban-client","get",jail,"banip").stdout.split() if valid_ip(x)]
-    chain=run("nft","list","chain","inet","fail2ban-filter","f2b-input").stdout
+    # A clean daemon can defer the entire action, including the input chain.
+    # A live set below still requires a reference in an existing chain.
+    chain=run("nft","list","chain","inet","fail2ban-filter","f2b-input",check=False).stdout
     for version,(name,start) in rendered.items():
         family_bans=[ip for ip in active_bans if ipaddress.ip_address(ip).version==version]
         live=run("nft","list","set","inet","fail2ban-filter",name,check=False)
