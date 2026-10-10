@@ -343,11 +343,11 @@ if sudo nft list table inet fail2ban-filter &>/dev/null; then
     
     # Count sets
     SETS_COUNT=$(sudo nft list sets inet fail2ban-filter 2>/dev/null | grep -c "name" || echo 0)
-    echo "  Sets found: $SETS_COUNT / 26 expected (13 IPv4 + 13 IPv6)"
+    echo "  Runtime sets found: $SETS_COUNT (zero-ban families may start lazily)"
     
     # Check INPUT chain
     INPUT_RULES=$(sudo nft list chain inet fail2ban-filter f2b-input 2>/dev/null | grep -c "drop" || echo 0)
-    echo "  INPUT rules: $INPUT_RULES / 26 expected"
+    echo "  Runtime INPUT rules: $INPUT_RULES"
     
     # Check FORWARD chain
     FORWARD_RULES=$(sudo nft list chain inet fail2ban-filter f2b-forward 2>/dev/null | grep -c "drop" || echo 0)
@@ -465,12 +465,13 @@ else
     ((ISSUES++))
 fi
 
-# Check 3: nftables sets match jails
-if [ "$SETS_COUNT" -eq 26 ]; then
-    log_success "All nftables sets present (26/26)"
+# Check 3: effective actions and family-aware runtime state, without repairs.
+VERIFY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if sudo python3 "$VERIFY_DIR/upgrade-v034dev-canary-227c393.py" --verify-only; then
+    log_success "Effective webshell actions, family sets and Docker membership verified"
 else
-    log_warn "nftables sets incomplete ($SETS_COUNT/26)"
-    ((ISSUES++))
+    log_error "Runtime action verification failed"
+    ISSUES=$((ISSUES + 1))
 fi
 
 # Check 4: FORWARD chain protection
@@ -500,7 +501,7 @@ if [ "$ISSUES" -eq 0 ] && [ "$MISSING_ACTIONS" -eq 0 ] && [ "$MISSING_FILTERS" -
     echo "  ✓ FORWARD chain protecting backend services"
     echo "  ✓ Recidive jail active (30d ban)"
     echo "  ✓ 13 jails (vrátane webshell-sweep) nakonfigurovaných"
-    echo "  ✓ 26 nftables setov (IPv4+IPv6) prítomných"
+    echo "  ✓ Efektívne IPv4/IPv6 akcie a Docker členstvo overené"
 else
     log_warn "⚠️ CONFIGURATION HAS ISSUES"
     echo ""

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -335,6 +336,19 @@ def verify_after(bans: dict[str, list[str]], before_nft: dict) -> None:
     version = run("/usr/local/bin/f2b", "version", "--short").stdout.strip()
     if version != RELEASE:
         raise UpgradeError(f"Installed wrapper reports {version!r}, expected {RELEASE!r}")
+    verify_release_runtime(bans, before_nft)
+
+
+def verify_release_runtime(bans: dict[str, list[str]], before_nft: dict) -> None:
+    # Use the same verifier exercised by the successful v0.34-dev canary.
+    # Any exception stays inside main's transaction and triggers rollback.
+    script = package_root() / "scripts/upgrade-v034dev-canary-227c393.py"
+    spec = importlib.util.spec_from_file_location("f2b_v034_runtime_checks", script)
+    if spec is None or spec.loader is None:
+        raise UpgradeError(f"Cannot load runtime verifier: {script}")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    verifier.verify_live(package_root(), bans, before_nft)
 
 
 def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:

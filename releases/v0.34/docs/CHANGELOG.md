@@ -6,6 +6,13 @@ Development candidate; not approved for production deployment.
 
 ### Corrected
 
+- Integrated the successful development-canary runtime verifier into the
+  standard upgrade transaction and read-only jail verification. Supports
+  Fail2Ban 1.0.2 comma-separated action names, single-action family properties,
+  lazy zero-ban sets, exact Docker hook checks and actual ban membership.
+  Live canary evidence and remaining rc1 gates are recorded separately from
+  fixture results in `CANARY-VALIDATION.md`.
+
 - Restored the upstream `nftables-multiport` family-selection shim and mapped
   IPv6 actions to `f2b-<name>-v6`.
 - Kept recidive IPv4 and IPv6 actions separate.

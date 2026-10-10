@@ -2,6 +2,8 @@ import importlib.util
 import pathlib
 import sys
 import tempfile
+from unittest.mock import patch
+import subprocess
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -79,4 +81,32 @@ with tempfile.TemporaryDirectory() as directory:
     else:
         raise AssertionError("Corrupt backup passed checksum verification")
 
-print("PASS: upgrade parsing, scope and external-firewall integrity checks")
+# The standard upgrade must run the canary verifier inside the transaction.
+# Inject a verifier failure after reload and require automatic rollback with
+# the exact backup and original deployment map.
+with patch.object(module, "require_root"), \
+     patch.object(module, "preflight", return_value=({"sshd": ["192.0.2.8"]}, base)), \
+     patch.object(module, "create_backup", return_value=pathlib.Path("/fixture/backup")), \
+     patch.object(module, "deploy"), \
+     patch.object(module, "run", return_value=subprocess.CompletedProcess([], 0, "0.34-dev\n", "")), \
+     patch.object(module, "restore_missing_bans"), \
+     patch.object(module, "assert_bans_preserved"), \
+     patch.object(module, "nft_ruleset", return_value=base), \
+     patch.object(module, "validate_live_firewall"), \
+     patch.object(module, "verify_release_runtime", side_effect=RuntimeError("Docker membership missing")) as verify, \
+     patch.object(module, "rollback") as restore, \
+     patch.object(sys, "argv", [str(SCRIPT), "--apply"]):
+    assert module.main() == 1
+    verify.assert_called_once_with({"sshd": ["192.0.2.8"]}, base)
+    restore.assert_called_once_with(pathlib.Path("/fixture/backup"), mapping)
+    restore.reset_mock()
+    verify.side_effect = None
+    assert module.main() == 0
+    restore.assert_not_called()
+    verify.reset_mock()
+    with patch.object(sys, "argv", [str(SCRIPT)]), patch.object(module, "deploy") as deploy:
+        assert module.main() == 0
+        deploy.assert_not_called()
+        verify.assert_not_called()
+
+print("PASS: standard upgrade scope, firewall integrity and runtime-failure rollback")

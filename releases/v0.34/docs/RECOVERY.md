@@ -42,6 +42,25 @@ they are never shortened.
 
 Any failed verification triggers automatic rollback.
 
+The standard upgrade now shares the runtime verifier used by the successful
+development canary. It parses Fail2Ban 1.0.2 comma-separated action names,
+resolves IPv4/IPv6 properties on a single nftables action, and permits lazy
+runtime sets only for families without active bans. It checks the exact
+Docker hook command, reconciles actual live bans and verifies Docker set
+membership. These checks remain inside the backup/rollback transaction.
+
+For a separate read-only check after deployment:
+
+```bash
+sudo python3 scripts/upgrade-v034dev-canary-227c393.py --verify-only
+```
+
+This mode does not reload services, run synchronization, restore bans or
+repair Docker membership. The shell jail verifier uses this same mode rather
+than treating a fixed total of 26 runtime sets as a requirement.
+
+See `CANARY-VALIDATION.md` for the precise scope of live and fixture evidence.
+
 ## 3. Manual rollback
 
 Use the exact backup path printed by the apply command:

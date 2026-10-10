@@ -92,6 +92,36 @@ for active in ("192.0.2.8", "2001:db8::8"):
 active = ""
 module.run = real_run
 
+# Read-only verification must report missing Docker members without executing
+# a helper, sync command or ban. Apply reconciliation may repair real bans.
+from unittest.mock import patch
+calls = []
+present = False
+def docker_run(*args, check=True):
+    global present
+    calls.append(args)
+    if args[:3] == ("nft", "get", "element"):
+        if not present and check: raise module.UpgradeError("missing Docker member")
+        return Result(returncode=0 if present else 1)
+    if args[:2] == ("/usr/local/sbin/f2b-docker-hook", "ban"):
+        present = True
+        return Result()
+    raise AssertionError(args)
+
+with patch.object(module, "snapshot_bans", return_value={module.JAIL: ["2001:db8::8"]}), \
+     patch.object(module, "action_names", return_value=["docker-sync-hook"]), \
+     patch.object(module, "scalar", return_value="31536000"), \
+     patch.object(module, "run", side_effect=docker_run):
+    try:
+        module.verify_docker_membership()
+    except module.UpgradeError:
+        pass
+    else:
+        raise AssertionError("Missing Docker member accepted")
+    assert all(call[0] == "nft" for call in calls)
+    module.verify_docker_membership(reconcile=True)
+    assert ("/usr/local/sbin/f2b-docker-hook", "ban", "2001:db8::8", module.JAIL, "31536000") in calls
+
 # Exercise the exact minimal-package layout through preflight, apply and rollback
 # without touching the host or invoking Fail2Ban/nftables.
 with tempfile.TemporaryDirectory() as directory:

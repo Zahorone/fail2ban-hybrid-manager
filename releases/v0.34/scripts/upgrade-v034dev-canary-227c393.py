@@ -225,26 +225,34 @@ def verify_docker_hook(jail):
     if hook!=f"/usr/local/sbin/f2b-docker-hook ban <ip> {jail} <bantime>":
         raise UpgradeError("Unexpected Docker hook ban command")
 
-def verify_live(root,bans,before):
-    run("fail2ban-client","-t"); run("fail2ban-client","ping"); restore_bans(bans)
-    if nft_digest(nft_json())!=nft_digest(before): raise UpgradeError("External nftables table changed")
+def verify_runtime():
+    """Read-only checks shared by canary, standard upgrade and diagnostics."""
     if JAIL not in parse_jails(run("fail2ban-client","status").stdout): raise UpgradeError("Canary jail inactive")
     for key,value in {"findtime":"30","maxretry":"3","bantime":"31536000"}.items():
         if scalar(JAIL,key)!=value: raise UpgradeError(f"Bad {key}")
     if "this_is_a_new_hello_world" not in run("fail2ban-client","get","f2b-exploit-critical","failregex").stdout: raise UpgradeError("IOC inactive")
     verify_docker_hook(JAIL)
     verify_nft_lifecycle(JAIL)
-    run("/usr/local/bin/f2b","sync","docker")
-    # Reconcile only genuine live bans. The hook handles either address family
-    # independently of the wrapper's historical nft set naming conventions.
+
+def verify_docker_membership(reconcile=False):
+    """Check actual active bans; optional repair is used only inside apply."""
     for jail,addresses in snapshot_bans().items():
         if "docker-sync-hook" not in action_names(jail): continue
         for ip in addresses:
             name="docker-banned-ipv4" if ipaddress.ip_address(ip).version==4 else "docker-banned-ipv6"
             query=("nft","get","element","inet","docker-block",name,"{",ip,"}")
-            if run(*query,check=False).returncode:
+            if reconcile and run(*query,check=False).returncode:
                 run("/usr/local/sbin/f2b-docker-hook","ban",ip,jail,scalar(jail,"bantime"))
             run(*query)
+
+def verify_live(root,bans,before):
+    run("fail2ban-client","-t"); run("fail2ban-client","ping"); restore_bans(bans)
+    if nft_digest(nft_json())!=nft_digest(before): raise UpgradeError("External nftables table changed")
+    verify_runtime()
+    run("/usr/local/bin/f2b","sync","docker")
+    # Reconcile only genuine live bans. The hook handles either address family
+    # independently of the wrapper's historical nft set naming conventions.
+    verify_docker_membership(reconcile=True)
     if nft_digest(nft_json())!=nft_digest(before): raise UpgradeError("External nftables table changed during sync")
     validate_payload(root)
 
@@ -262,11 +270,18 @@ def fixture_state(root):
 def main():
     parser=argparse.ArgumentParser(description=__doc__); mode=parser.add_mutually_exclusive_group()
     mode.add_argument("--apply",action="store_true"); mode.add_argument("--rollback",type=Path)
+    mode.add_argument("--verify-only",action="store_true",help="read-only runtime and Docker membership checks")
     parser.add_argument("--backup-dir",type=Path,default=Path("/var/backups/f2b-v034-canary"))
     parser.add_argument("--fixture-root",type=Path,help=argparse.SUPPRESS); args=parser.parse_args()
     root=package_root(); fixture=args.fixture_root is not None; system_root=args.fixture_root.resolve() if fixture else Path("/")
     mapping=install_map(root,system_root)
     try:
+        if args.verify_only:
+            if fixture: raise UpgradeError("--verify-only requires the live system")
+            if os.geteuid()!=0: raise UpgradeError("Run with sudo")
+            verify_runtime(); verify_docker_membership()
+            print("PASS: read-only runtime actions, family sets and Docker membership")
+            return 0
         validate_payload(root)
         if args.rollback: rollback(args.rollback,mapping,system_root,fixture); print(f"PASS: rollback restored {args.rollback}"); return 0
         bans,before=fixture_state(system_root) if fixture else production_preflight(root)
