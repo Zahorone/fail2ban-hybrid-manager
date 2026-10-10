@@ -48,5 +48,8 @@ Development candidate; not approved for production deployment.
   thirteen benign access-log cases.
 - Real missing-webshell sweep targets, IPv4/IPv6 threshold behavior, WordPress
   2xx/3xx endpoints, redirects, Referer/User-Agent and access/error duplication.
+- Added a narrow transactional canary updater for existing v0.34-dev hosts at
+  changeset `227c393`, including full backup, ban preservation, verification,
+  and automatic rollback without restarting Docker or nftables.
 
 The historical v0.33 changelog remains in `releases/v0.33/docs/CHANGELOG.md`.

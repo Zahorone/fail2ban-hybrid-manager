@@ -244,9 +244,14 @@ def validate_candidate(root: Path, mapping: dict[Path, Path]) -> None:
             raise UpgradeError("Candidate does not resolve the IPv6 recidive set")
 
 
-def create_backup(backup_base: Path, bans: dict[str, list[str]], nft_doc: dict) -> Path:
+def create_backup(
+    backup_base: Path,
+    bans: dict[str, list[str]],
+    nft_doc: dict,
+    label: str = "v033-to-v034",
+) -> Path:
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = backup_base / f"v033-to-v034-{timestamp}"
+    backup = backup_base / f"{label}-{timestamp}"
     backup.mkdir(parents=True, mode=0o700)
     existing = [str(path) for path in SYSTEM_BACKUP_PATHS if (Path("/") / path).exists()]
     if existing:

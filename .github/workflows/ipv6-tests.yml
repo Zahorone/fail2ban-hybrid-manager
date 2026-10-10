@@ -24,6 +24,8 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
       - name: Upgrade transaction unit tests
         run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
+      - name: Canary 227c393 transaction scope tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_canary_upgrade_227c393.py
       - name: Optional Easy!Appointments Apache hardening tests
         run: /usr/bin/python3 releases/v0.34/tests/test_easyappointments_hardening.py
       - name: Critical RCE access and error log fixtures
