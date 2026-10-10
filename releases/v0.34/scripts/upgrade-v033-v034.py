@@ -323,6 +323,9 @@ def validate_live_firewall() -> None:
         for expression in ("ip saddr @f2b-recidive", "ip6 saddr @f2b-recidive-v6"):
             if expression not in rules:
                 raise UpgradeError(f"Missing {expression!r} in {chain}")
+    docker = run("nft", "list", "chain", "inet", "docker-block", "prerouting").stdout
+    for expression in ("hook prerouting", "ip saddr @docker-banned-ipv4 drop", "ip6 saddr @docker-banned-ipv6 drop"):
+        if expression not in docker: raise UpgradeError("Missing Docker enforcement: " + expression)
 
 
 def validate_candidate(root: Path, mapping: dict[Path, Path]) -> None:
@@ -618,7 +621,7 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     audit_targets(root, mapping)
     run("systemctl", "is-active", "--quiet", "cron")
     version = run("/usr/local/bin/f2b", "version", "--short").stdout.strip().lstrip("v")
-    if version not in {"0.33", RELEASE}: raise UpgradeError("Unsupported installed wrapper version: " + version)
+    if version not in {"0.33", "0.33-ipv6.1", RELEASE}: raise UpgradeError("Unsupported installed wrapper version: " + version)
     snapshot_ban_times()
     with tempfile.TemporaryDirectory(prefix="f2b-persistence-preflight-") as temporary:
         prepare_persistence(dict(mapping), Path(temporary))

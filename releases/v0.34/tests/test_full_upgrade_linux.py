@@ -42,8 +42,9 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     shutil.copytree('/etc', private_etc, symlinks=True)
     run('mount', '--bind', str(private_etc), '/etc')
     # Clone just fixture-owned paths and bind them privately, never the host.
-    for name in ('/etc/fail2ban', '/etc/nftables.d', '/etc/cron.d', '/etc/systemd/system',
-                 '/usr/local', '/etc/f2b', '/var/lib/fail2ban', '/var/log', '/opt/rustnpm/data/logs'):
+    bind_targets = ('/etc/fail2ban', '/etc/nftables.d', '/etc/cron.d', '/etc/systemd/system',
+                    '/usr/local', '/etc/f2b', '/var/lib/fail2ban', '/var/log', '/opt/rustnpm/data/logs')
+    for name in bind_targets:
         target = Path(name)
         clone = temporary / 'root' / target.relative_to('/')
         clone.mkdir(parents=True)
@@ -139,7 +140,9 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
     except Exception:
-        print(Path('/var/log/fail2ban.log').read_text(errors='replace'))
+        print('\n'.join(Path('/var/log/fail2ban.log').read_text(errors='replace').splitlines()[-80:]))
         raise
     finally:
         run('fail2ban-client', 'stop', check=False)
+        for target in reversed(bind_targets): run('umount', target)
+        run('umount', '/etc')

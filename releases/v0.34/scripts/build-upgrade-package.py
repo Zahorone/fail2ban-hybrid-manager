@@ -36,7 +36,7 @@ def build(output):
         if source.name == 'f2b-wrapper-v034.sh': previous = root.parent / 'v0.33/scripts/f2b-wrapper-v033.sh'
         known[str(target)] = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (previous, source) if p.is_file()]
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
-                'upgrade_from': ['0.33', '0.34-dev'], 'known_targets': known,
+                'upgrade_from': ['0.33', '0.33-ipv6.1', '0.34-dev'], 'known_targets': known,
                 'files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)},
                 'targets': {str(p): str(s.relative_to(root)) for p, s in sorted(mapping.items())},
                 'generated_targets': ['/etc/nftables.conf', '/etc/nftables.d/fail2ban-filter.nft', '/etc/nftables.d/docker-block.nft'],
