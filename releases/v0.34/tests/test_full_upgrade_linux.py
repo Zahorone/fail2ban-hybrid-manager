@@ -4,6 +4,7 @@ systemd/cron are deliberately simulated: this is NOT a VM/reboot test.
 """
 import hashlib
 import io
+import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -12,6 +13,7 @@ import tarfile
 import tempfile
 import time
 import sys
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -136,6 +138,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         # Reapplication must pass preflight with the now-installed v0.34 files.
         print(run(*command).stdout)
+        print(run(*command, '--apply', '--backup-dir', str(temporary / 'repeat-backups')).stdout)
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
         print(run(*command, '--rollback', str(backup)).stdout)
@@ -144,6 +147,23 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert not Path('/etc/cron.d/f2b-v034-sync').exists()
         restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
         assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8', '192.0.2.99'))
+        assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
+        # Actual auto-rollback after a fault in the third file replacement.
+        spec = importlib.util.spec_from_file_location('full_upgrade_fault', script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        actual_install = module.atomic_install
+        calls = []
+        def fail_third(source, target):
+            calls.append(target)
+            if len(calls) == 3: raise OSError('namespace injected deployment failure')
+            return actual_install(source, target)
+        with patch.object(module, 'atomic_install', side_effect=fail_third), \
+             patch.object(sys, 'argv', [str(script), '--apply', '--backup-dir', str(temporary / 'fault-backups')]):
+            assert module.main() == 1
+        assert len(calls) == 3
+        assert not Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists()
+        assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
     except Exception:
