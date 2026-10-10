@@ -5,7 +5,7 @@
 # Installs the unified F2B management wrapper
 #
 # v0.34-dev KEY CHANGES (2026-10-08):
-#   - Updated compatibility for nftables v0.34-dev (12 jailov, 24 setov)
+#   - Updated compatibility for nftables v0.34-dev (13 jailov, 26 setov)
 #   - Improved version/release matching against f2b-wrapper-v034.sh
 #   - Unified log files with new sync/audit/docker logging layout
 #
@@ -276,7 +276,7 @@ echo "════════════════════════�
 echo " F2B WRAPPER ${RELEASE} INSTALLED!"
 echo "═══════════════════════════════════════════════════════"
 echo ""
-log "Wrapper compatible with v0.34-dev (12 jails, 24 nftables setov)"
+log "Wrapper compatible with v0.34-dev (13 jails, 26 nftables setov)"
 log "Installation location: /usr/local/bin/f2b"
 log "Log file: /var/log/f2b-wrapper.log"
 log "Backup directory: /var/backups/firewall"

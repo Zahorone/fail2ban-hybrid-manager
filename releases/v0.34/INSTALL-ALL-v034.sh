@@ -6,7 +6,7 @@
 #
 # Features:
 # - Auto-detects: Fresh install / Upgrade from v0.19/v0.31
-# - 12 Fail2Ban jails + 12 detection filters (Added nginx-php-errors)
+# - 13 Fail2Ban jails + 12 detection filters (including webshell sweep)
 # - Full IPv4 + IPv6 dual-stack support
 # - F2B Wrapper v0.34-dev (50 functions)
 # - Docker port blocking v0.4
@@ -175,7 +175,7 @@ case "$INSTALLTYPE" in
     echo ""
     echo "Will install:"
     echo " • nftables with fail2ban-filter table (IPv4/IPv6)"
-    echo " • Fail2Ban with 12 jails (Added: nginx-php-errors)"
+    echo " • Fail2Ban with 13 jails (including webshell-sweep)"
     echo " • 12 detection filters"
     echo " • Docker port blocking v0.4"
     echo " • F2B wrapper ${RELEASE} (50+ functions)"
@@ -724,28 +724,28 @@ step 9 "$TOTALSTEPS" "Final system verification"
 echo ""
 
 ################################################################################
-# VERIFICATION (UPDATED FOR 12 JAILS)
+# VERIFICATION (UPDATED FOR 13 JAILS)
 ################################################################################
 
 # Verify nftables
-# Počítame sety (mali by byť 12 IPv4 a 12 IPv6)
+# Počítame sety (mali by byť 13 IPv4 a 13 IPv6)
 SETSV4=$(nft list table inet fail2ban-filter 2>/dev/null | grep "set f2b-" | grep -vc "\-v6" || echo 0)
 SETSV6=$(nft list table inet fail2ban-filter 2>/dev/null | grep -c "set f2b-.*-v6" || echo 0)
-# Počítame pravidlá (12 jailov x 2 verzie IP = 24 INPUT pravidiel)
+# Počítame pravidlá (13 jailov x 2 verzie IP = 26 INPUT pravidiel)
 INPUTRULES=$(nft list chain inet fail2ban-filter f2b-input 2>/dev/null | grep -c "drop" || echo 0)
 FORWARDRULES=$(nft list chain inet fail2ban-filter f2b-forward 2>/dev/null | grep -c "drop" || echo 0)
 
 echo "nftables Structure:"
-echo " • IPv4 sets: $SETSV4 / 12"
-echo " • IPv6 sets: $SETSV6 / 12"
-echo " • INPUT rules: $INPUTRULES / 24"
+echo " • IPv4 sets: $SETSV4 / 13"
+echo " • IPv6 sets: $SETSV6 / 13"
+echo " • INPUT rules: $INPUTRULES / 26"
 echo " • FORWARD rules: $FORWARDRULES / 6" # Forward ostáva cca rovnako
 echo ""
 
 # Verify Fail2Ban
 JAILCOUNT=$(fail2ban-client status 2>/dev/null | grep "Jail list:" | sed 's/.*://' | tr ',' '\n' | wc -l || echo 0)
 echo "Fail2Ban:"
-echo " • Active jails: $JAILCOUNT / 12"
+echo " • Active jails: $JAILCOUNT / 13"
 echo ""
 
 # Verify F2B wrapper
@@ -781,11 +781,11 @@ echo ""
 ################################################################################
 
 ERRORS=0
-[ "$SETSV4" -ne 12 ] && ((ERRORS++))
-[ "$SETSV6" -ne 12 ] && ((ERRORS++))
-[ "$INPUTRULES" -ne 24 ] && ((ERRORS++))
+[ "$SETSV4" -ne 13 ] && ((ERRORS++))
+[ "$SETSV6" -ne 13 ] && ((ERRORS++))
+[ "$INPUTRULES" -ne 26 ] && ((ERRORS++))
 # [ "$FORWARDRULES" -ne 6 ] && ((ERRORS++)) # Toto je menej striktné, záleží od setupu
-[ "$JAILCOUNT" -lt 12 ] && ((ERRORS++))
+[ "$JAILCOUNT" -lt 13 ] && ((ERRORS++))
 
 ENDTIME=$(date +%s)
 DURATION=$((ENDTIME - STARTTIME))
@@ -815,8 +815,8 @@ echo ""
 if [ "$ERRORS" -eq 0 ]; then
   echo "Your system is now protected with ${RELEASE}:"
   echo " ✓ Full IPv4 + IPv6 dual-stack support"
-  echo " ✓ 24 nftables rules (12 IPv4 + 12 IPv6)"
-  echo " ✓ 12 Fail2Ban jails + 12 detection filters"
+  echo " ✓ 26 nftables rules (13 IPv4 + 13 IPv6)"
+  echo " ✓ 13 Fail2Ban jails + 12 detection filters"
   echo " ✓ Docker port blocking v0.4"
   echo " ✓ F2B wrapper ${RELEASE} (50+ functions)"
   echo " ✓ Docker-block auto-sync (every 1 minute)"

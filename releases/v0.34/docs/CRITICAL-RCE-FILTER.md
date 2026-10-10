@@ -18,7 +18,8 @@ The filter also covers three high-confidence groups in NPM access logs:
 - direct reads of SSH, GnuPG, Google Cloud and Azure credential files listed
   in the filter, under any directory prefix;
 - the exact known webshell basenames `wso.php`, `b374k.php`, `alfa.php`,
-  `wp_filemanager.php`, `filemanager.php`, `priv8.php`, and `mini_shell.php`;
+  `filemanager.php`, `priv8.php`, and `mini_shell.php`, plus only the observed
+  `wp-content/plugins/hellopress/wp_filemanager.php` plugin path;
 - `POST`, `PUT`, or `PATCH` of a final `.php`, `.phpN`, `.phtml`, or `.phar`
   filename below an `upload(s)`, `file(s)`, or `image(s)` path segment.
 

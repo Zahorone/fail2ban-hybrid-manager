@@ -138,6 +138,7 @@ EXPECTED_FILTERS=(
 "manualblock.conf"
 "recidive.conf"
 "nginx-php-errors.conf"
+"f2b-webshell-sweep.conf"
 )
 
 for filter in "${EXPECTED_FILTERS[@]}"; do
@@ -200,6 +201,13 @@ if [ -f "$CONFIG_DIR/exploit-critical-rce.local" ]; then
     "$CONFIG_DIR/exploit-critical-rce.local" \
     /etc/fail2ban/jail.d/99-exploit-critical-rce.local
   log_success "Installed critical RCE jail policy and error-log coverage"
+fi
+
+if [ -f "$CONFIG_DIR/webshell-sweep.local" ]; then
+  sudo install -o root -g root -m 0644 \
+    "$CONFIG_DIR/webshell-sweep.local" \
+    /etc/fail2ban/jail.d/99-webshell-sweep.local
+  log_success "Installed rate-based webshell sweep jail"
 fi
 
 echo ""

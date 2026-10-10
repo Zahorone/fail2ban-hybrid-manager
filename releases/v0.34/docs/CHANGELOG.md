@@ -29,6 +29,10 @@ Development candidate; not approved for production deployment.
 - Added high-confidence credential-file reads, exact known webshell basenames,
   and executable upload-tree writes to the same critical jail without matching
   ordinary application POSTs or non-executable uploads.
+- Added the exact `/this_is_a_new_hello_world.php` critical IOC and a separate
+  WordPress-safe `f2b-webshell-sweep` jail. The sweep requires three missing
+  executable GET/HEAD targets returning final 404 within 30 seconds; redirects,
+  successful PHP endpoints and error-log duplicates do not count.
 
 ### Tests
 
@@ -42,5 +46,7 @@ Development candidate; not approved for production deployment.
   benign cases, including payload text present only in the referrer.
 - Twenty-four credential, webshell and executable-upload attack fixtures plus
   thirteen benign access-log cases.
+- Real missing-webshell sweep targets, IPv4/IPv6 threshold behavior, WordPress
+  2xx/3xx endpoints, redirects, Referer/User-Agent and access/error duplication.
 
 The historical v0.33 changelog remains in `releases/v0.33/docs/CHANGELOG.md`.

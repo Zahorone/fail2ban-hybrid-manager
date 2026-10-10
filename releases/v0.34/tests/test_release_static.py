@@ -75,4 +75,20 @@ assert "/opt/rustnpm/data/logs/*_error.log tail" in exploit_jail
 assert "99-exploit-critical-rce.local" in upgrade
 assert "99-exploit-critical-rce.local" in installer
 
+sweep_filter = (ROOT / "filters/f2b-webshell-sweep.conf").read_text()
+sweep_jail = (ROOT / "config/webshell-sweep.local").read_text()
+assert " - 404 " in sweep_filter
+assert "(?:GET|HEAD)" in sweep_filter
+assert "POST" not in sweep_filter.split("failregex =", 1)[1].split("ignoreregex =", 1)[0]
+assert "maxretry = 3" in sweep_jail
+assert "findtime = 30" in sweep_jail
+assert "bantime = 31536000" in sweep_jail
+assert "error" not in sweep_jail
+assert "99-webshell-sweep.local" in upgrade
+assert '"f2b-webshell-sweep"' in wrapper
+assert '"f2b-webshell-sweep"' in installer.replace(".conf", "")
+assert "this_is_a_new_hello_world" in exploit_filter
+assert exploit_filter.count("wp-content/plugins/hellopress/wp_filemanager") == 3
+assert "26/26" in (ROOT / "scripts/01-install-nftables-v034.sh").read_text()
+
 print("PASS: v0.34 static safety and integration checks")

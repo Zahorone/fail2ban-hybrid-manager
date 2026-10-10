@@ -1,0 +1,14 @@
+# Managed v0.34 jail: repeated missing executable paths, not one-shot PHP bans.
+[f2b-webshell-sweep]
+enabled = true
+port = http,https
+filter = f2b-webshell-sweep
+backend = polling
+findtime = 30
+maxretry = 3
+bantime = 31536000
+logpath = /opt/rustnpm/data/logs/proxy-host-*_access.log tail
+          /opt/rustnpm/data/logs/fallback_access.log tail
+          /opt/rustnpm/data/logs/fallback_http_access.log tail
+          /opt/rustnpm/data/logs/dead-host_access.log tail
+action = %(action_mwl)s

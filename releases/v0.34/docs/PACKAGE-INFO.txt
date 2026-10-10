@@ -3,13 +3,14 @@ Fail2Ban Hybrid Manager 0.34-dev DEVELOPMENT CANDIDATE
 Status: not released; not approved for production installation.
 
 Contents:
-- 12 Fail2Ban jail definitions and exploit-focused filters
+- 13 Fail2Ban jail definitions and exploit-focused filters
 - upstream-compatible nftables multiport action shim
 - dual-stack recidive and Docker synchronization helpers
 - scoped firewall configuration without global ruleset flush
 - binary-safe nginx/PHP evidence mail override
 - reporting-only trusted service probe filter
 - regression tests for IPv6, reporting scope, PHP matching and static safety
+- WordPress-safe missing-webshell sweep fixtures and threshold tests
 - transactional v0.33 preflight, upgrade and rollback tool
 
 Required before release:

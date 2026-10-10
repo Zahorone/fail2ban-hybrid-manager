@@ -78,6 +78,7 @@ def install_map(root: Path) -> dict[Path, Path]:
             Path("/etc/fail2ban/jail.d/99-php-errors-mail.local"): root / "config/php-errors-mail.local",
             Path("/etc/fail2ban/jail.d/99-recidive-mail.local"): root / "config/recidive-mail.local",
             Path("/etc/fail2ban/jail.d/99-exploit-critical-rce.local"): root / "config/exploit-critical-rce.local",
+            Path("/etc/fail2ban/jail.d/99-webshell-sweep.local"): root / "config/webshell-sweep.local",
             Path("/usr/local/bin/f2b"): root / "scripts/f2b-wrapper-v034.sh",
             Path("/usr/local/sbin/f2b-docker-hook"): root / "scripts/f2b-docker-hook.sh",
             Path("/usr/local/sbin/f2b-ipv6-sync.py"): root / "scripts/f2b-ipv6-sync.py",

@@ -192,6 +192,7 @@ JAILS=(
     "sshd"
     "sshd-slowattack"
     "f2b-exploit-critical"
+    "f2b-webshell-sweep"
     "f2b-dos-high"
     "f2b-web-medium"
     "nginx-recon-bonus"
@@ -342,11 +343,11 @@ if sudo nft list table inet fail2ban-filter &>/dev/null; then
     
     # Count sets
     SETS_COUNT=$(sudo nft list sets inet fail2ban-filter 2>/dev/null | grep -c "name" || echo 0)
-    echo "  Sets found: $SETS_COUNT / 24 expected (12 IPv4 + 12 IPv6)"
+    echo "  Sets found: $SETS_COUNT / 26 expected (13 IPv4 + 13 IPv6)"
     
     # Check INPUT chain
     INPUT_RULES=$(sudo nft list chain inet fail2ban-filter f2b-input 2>/dev/null | grep -c "drop" || echo 0)
-    echo "  INPUT rules: $INPUT_RULES / 24 expected"
+    echo "  INPUT rules: $INPUT_RULES / 26 expected"
     
     # Check FORWARD chain
     FORWARD_RULES=$(sudo nft list chain inet fail2ban-filter f2b-forward 2>/dev/null | grep -c "drop" || echo 0)
@@ -449,8 +450,8 @@ echo "Checking configuration consistency..."
 echo ""
 
 # Check 1: All jails in jail.local are active
-if [ "$TOTAL_JAILS" -lt 11 ]; then
-    log_warn "Only $TOTAL_JAILS jails active (expected: 11-12 for full profile)"
+if [ "$TOTAL_JAILS" -lt 13 ]; then
+    log_warn "Only $TOTAL_JAILS jails active (expected: 13 for full profile)"
     ((ISSUES++))
 else
     log_success "$TOTAL_JAILS jails active"
@@ -465,10 +466,10 @@ else
 fi
 
 # Check 3: nftables sets match jails
-if [ "$SETS_COUNT" -eq 24 ]; then
-    log_success "All nftables sets present (24/24)"
+if [ "$SETS_COUNT" -eq 26 ]; then
+    log_success "All nftables sets present (26/26)"
 else
-    log_warn "nftables sets incomplete ($SETS_COUNT/24)"
+    log_warn "nftables sets incomplete ($SETS_COUNT/26)"
     ((ISSUES++))
 fi
 
@@ -498,8 +499,8 @@ if [ "$ISSUES" -eq 0 ] && [ "$MISSING_ACTIONS" -eq 0 ] && [ "$MISSING_FILTERS" -
     echo "  ✓ nftables integration working"
     echo "  ✓ FORWARD chain protecting backend services"
     echo "  ✓ Recidive jail active (30d ban)"
-    echo "  ✓ 12 jails (vrátane nginx-php-errors) nakonfigurovaných"
-    echo "  ✓ 24 nftables setov (IPv4+IPv6) prítomných"
+    echo "  ✓ 13 jails (vrátane webshell-sweep) nakonfigurovaných"
+    echo "  ✓ 26 nftables setov (IPv4+IPv6) prítomných"
 else
     log_warn "⚠️ CONFIGURATION HAS ISSUES"
     echo ""
@@ -521,4 +522,3 @@ echo "  - Jail details: sudo fail2ban-client status <jail_name>"
 echo "  - nftables dump: sudo nft list table inet fail2ban-filter"
 echo "  - Live log: sudo tail -f /var/log/fail2ban.log"
 echo ""
-

@@ -40,10 +40,11 @@ echo "║ Release ${RELEASE}                                         ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Všetky jaily (Aktualizované pre v0.34-dev - 12 jailov)
+# Všetky jaily (Aktualizované pre v0.34-dev - 13 jailov)
 JAILS=(
 "sshd"
 "f2b-exploit-critical"
+"f2b-webshell-sweep"
 "f2b-dos-high"
 "f2b-web-medium"
 "nginx-recon-bonus"
@@ -59,6 +60,7 @@ JAILS=(
 declare -A SET_MAP=(
 [sshd]="f2b-sshd"
 [f2b-exploit-critical]="f2b-exploit-critical"
+[f2b-webshell-sweep]="f2b-webshell-sweep"
 [f2b-dos-high]="f2b-dos-high"
 [f2b-web-medium]="f2b-web-medium"
 [nginx-recon-bonus]="f2b-nginx-recon-bonus"
@@ -169,4 +171,3 @@ echo "  */30 * * * * root /usr/local/bin/f2b sync force > /dev/null 2>&1"
 echo "  # Periodic audit report (optional)"
 echo "  0 */6 * * * * root /usr/local/bin/f2b audit-silent > /dev/null 2>&1"
 echo ""
-

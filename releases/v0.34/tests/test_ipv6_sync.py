@@ -72,6 +72,11 @@ helper.nft('add', 'set', 'inet', 'docker-block', 'docker-banned-ipv6',
 helper.nft('add', 'table', 'inet', 'fail2ban-filter')
 helper.nft('add', 'set', 'inet', 'fail2ban-filter', 'f2b-recidive-v6',
            '{ type ipv6_addr; flags timeout; timeout 30d; }')
+helper.nft('add', 'set', 'inet', 'fail2ban-filter', 'f2b-webshell-sweep-v6',
+           '{ type ipv6_addr; flags timeout; timeout 365d; }')
+helper.nft('add', 'element', 'inet', 'fail2ban-filter', 'f2b-webshell-sweep-v6',
+           '{ ' + address + ' timeout 365d }')
+assert address in helper.readset('fail2ban-filter', 'f2b-webshell-sweep-v6')
 helper.nft('add', 'element', 'inet', 'docker-block', 'docker-banned-ipv6',
            '{ ' + address + ' timeout 60s }')
 helper.reconcile(all_ips, 'docker-block', 'docker-banned-ipv6')

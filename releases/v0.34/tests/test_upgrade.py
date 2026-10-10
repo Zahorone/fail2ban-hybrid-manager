@@ -50,6 +50,8 @@ assert pathlib.Path("/etc/fail2ban/jail.local") not in mapping
 assert pathlib.Path("/etc/fail2ban/action.d/nftables-common.local") not in mapping
 assert pathlib.Path("/etc/nftables.conf") not in mapping
 assert pathlib.Path("/usr/local/bin/f2b") in mapping
+assert pathlib.Path("/etc/fail2ban/jail.d/99-webshell-sweep.local") in mapping
+assert pathlib.Path("/etc/fail2ban/filter.d/f2b-webshell-sweep.conf") in mapping
 
 with tempfile.TemporaryDirectory() as directory:
     directory = pathlib.Path(directory)

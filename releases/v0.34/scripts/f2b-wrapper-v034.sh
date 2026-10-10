@@ -10,7 +10,7 @@
 # - jq (JSON processor) - install: sudo apt install jq
 #
 # v0.34-dev CHANGES (2026-10-08):
-#   - Added nginx-php-errors jail/set awareness (12 jails, 24 nft sets)
+#   - Added webshell-sweep jail/set awareness (13 jails, 26 nft sets)
 #   - Minor output updates to reflect v0.34-dev infrastructure
 #
 # v0.32 CHANGES (2025-12-20):
@@ -94,6 +94,7 @@ JAILS=(
   "sshd"
   "sshd-slowattack"
   "f2b-exploit-critical"
+  "f2b-webshell-sweep"
   "f2b-dos-high"
   "f2b-web-medium"
   "nginx-recon-bonus"
@@ -110,6 +111,7 @@ declare -A SETMAP=(
   ["sshd"]="f2b-sshd"
   ["sshd-slowattack"]="f2b-sshd-slowattack"
   ["f2b-exploit-critical"]="f2b-exploit-critical"
+  ["f2b-webshell-sweep"]="f2b-webshell-sweep"
   ["f2b-dos-high"]="f2b-dos-high"
   ["f2b-web-medium"]="f2b-web-medium"
   ["nginx-recon-bonus"]="f2b-nginx-recon-bonus"
@@ -968,6 +970,7 @@ f2b_docker_verify() {
       f2b-sshd \
       f2b-sshd-slowattack \
       f2b-exploit-critical \
+      f2b-webshell-sweep \
       f2b-dos-high \
       f2b-web-medium \
       f2b-nginx-recon-bonus \
@@ -1072,6 +1075,7 @@ f2b_sync_docker_full() {
     "f2b-sshd"
     "f2b-sshd-slowattack"
     "f2b-exploit-critical"
+    "f2b-webshell-sweep"
     "f2b-dos-high"
     "f2b-web-medium"
     "f2b-nginx-recon-bonus"
@@ -1294,6 +1298,7 @@ f2b_sync_docker() {
     "f2b-sshd"
     "f2b-sshd-slowattack"
     "f2b-exploit-critical"
+    "f2b-webshell-sweep"
     "f2b-dos-high"
     "f2b-web-medium"
     "f2b-nginx-recon-bonus"
@@ -3207,6 +3212,7 @@ USAGE: f2b [args]
 CORE:
   status                      Show comprehensive status
   audit                       Audit all jails
+  # Includes f2b-webshell-sweep (3 missing executable 404s in 30 seconds)
   find <IP>                   Find IP in jails
   version [--json|--short]    Show version info
   version --json              Machine-readable JSON

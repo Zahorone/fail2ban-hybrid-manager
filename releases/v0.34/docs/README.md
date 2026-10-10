@@ -30,6 +30,10 @@ test gates have passed.
 - The same critical jail detects exact private credential paths, known webshell
   basenames, and executable-file writes below upload-like path segments. These
   signatures remain scoped to the NPM request target.
+- `f2b-webshell-sweep` rate-limits only repeated final 404 access responses for
+  missing executable filenames. It remains safe for legitimate WordPress PHP
+  endpoints and ignores redirects and parallel error-log records; see
+  `docs/WEBSHELL-SWEEP.md`.
 
 ## Trusted reporting probes
 

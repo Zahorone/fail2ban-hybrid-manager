@@ -28,6 +28,29 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_easyappointments_hardening.py
       - name: Critical RCE access and error log fixtures
         run: /usr/bin/python3 releases/v0.34/tests/test_exploit_critical.py
+      - name: WordPress-safe webshell sweep fixtures
+        run: /usr/bin/python3 releases/v0.34/tests/test_webshell_sweep.py
+      - name: Full Fail2Ban candidate configuration test
+        run: |
+          candidate="$(mktemp -d)"
+          cp -a /etc/fail2ban/. "$candidate/"
+          cp releases/v0.34/filters/*.conf "$candidate/filter.d/"
+          cp releases/v0.34/actions/*.conf releases/v0.34/actions/*.local "$candidate/action.d/"
+          cp releases/v0.34/config/nginx-recon-optimized.local "$candidate/filter.d/"
+          cp releases/v0.34/config/f2b-anomaly-detection.local "$candidate/filter.d/"
+          cp releases/v0.34/config/jail.local "$candidate/jail.local"
+          sudo mkdir -p /opt/rustnpm/data/logs
+          sudo touch \
+            /opt/rustnpm/data/logs/fallback_access.log \
+            /opt/rustnpm/data/logs/fallback_http_access.log \
+            /opt/rustnpm/data/logs/dead-host_access.log \
+            /opt/rustnpm/data/logs/proxy-host-1_access.log \
+            /opt/rustnpm/data/logs/fallback_error.log \
+            /opt/rustnpm/data/logs/proxy-host-1_error.log \
+            /var/log/auth.log \
+            /var/log/fail2ban.log \
+            /var/log/fail2ban-blocked-ips.txt
+          sudo /usr/bin/fail2ban-client -c "$candidate" -t
       - name: PHP filter and binary-log mail tests
         run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
       - name: IPv6 parser tests

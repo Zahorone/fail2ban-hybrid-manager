@@ -7,8 +7,8 @@
 # Version: 3.3 (final v0.34-dev structure, based on v0.31)
 # Date: 2026-10-08
 # Changelog:
-#   - + nginx-php-errors jail (12 jailov = 24 setov)
-#   - Aktualizované počty pravidiel (INPUT 24, FORWARD 8)
+#   - + webshell sweep jail (13 jailov = 26 setov)
+#   - Aktualizované počty pravidiel (INPUT 26, FORWARD 8)
 #   - Migrácia IP rozšírená o nginx-php-errors
 # Component: INSTALL-NFTABLES
 # Part of: Fail2Ban Hybrid Nftables Manager
@@ -123,6 +123,7 @@ SETS=(
   "f2b-sshd"
   "f2b-sshd-slowattack"
   "f2b-exploit-critical"
+  "f2b-webshell-sweep"
   "f2b-dos-high"
   "f2b-web-medium"
   "f2b-nginx-recon-bonus"
@@ -181,7 +182,7 @@ for set in "${SETS[@]}"; do
   sudo nft add rule inet fail2ban-filter f2b-input ip6 saddr @"$set-v6" drop 2>/dev/null && echo "✓" || echo ""
 done
 
-log_success "INPUT pravidlá pridané (24/24)"
+log_success "INPUT pravidlá pridané (26/26)"
 
 echo ""
 
@@ -221,6 +222,7 @@ else
     ["sshd"]="f2b-sshd"
     ["sshd-slowattack"]="f2b-sshd-slowattack"
     ["f2b-exploit-critical"]="f2b-exploit-critical"
+    ["f2b-webshell-sweep"]="f2b-webshell-sweep"
     ["f2b-dos-high"]="f2b-dos-high"
     ["f2b-web-medium"]="f2b-web-medium"
     ["nginx-recon-bonus"]="f2b-nginx-recon-bonus"
@@ -316,15 +318,15 @@ sudo nft list table inet fail2ban-filter 2>/dev/null | head -35
 
 echo ""
 
-log_info "Vytvorené sety (24 expected: 12 IPv4 + 12 IPv6):"
+log_info "Vytvorené sety (26 expected: 13 IPv4 + 13 IPv6):"
 
 SETSV4=$(sudo nft list table inet fail2ban-filter 2>/dev/null | grep -E "^[[:space:]]*set f2b-" | grep -vc -- "-v6" || echo 0)
 SETSV6=$(sudo nft list table inet fail2ban-filter 2>/dev/null | grep -E "^[[:space:]]*set f2b-.*-v6" | wc -l | tr -d ' ' || echo 0)
 TOTALSETS=$((SETSV4 + SETSV6))
 
-log_info "Počet setov: ${TOTALSETS} / 24"
+log_info "Počet setov: ${TOTALSETS} / 26"
 
-if [ "$TOTALSETS" -eq 24 ]; then
+if [ "$TOTALSETS" -eq 26 ]; then
   log_success "Všetky sety vytvorené!"
 else
   log_warn "Očakávaných 24 setov, nájdených ${TOTALSETS}"
@@ -342,9 +344,9 @@ echo ""
 
 log_info "DROP pravidlá v INPUT chain:"
 INPUT_RULES=$(sudo nft list chain inet fail2ban-filter f2b-input 2>/dev/null | grep -c "drop" || echo 0)
-echo "  Počet: $INPUT_RULES / 24 (12 IPv4 + 12 IPv6)"
+echo "  Počet: $INPUT_RULES / 26 (13 IPv4 + 13 IPv6)"
 
-if [ "$INPUT_RULES" -eq 24 ]; then
+if [ "$INPUT_RULES" -eq 26 ]; then
   log_success "Všetky INPUT pravidlá vytvorené!"
 else
   log_warn "Očakávaných 24 pravidiel, nájdených $INPUT_RULES"
@@ -362,7 +364,7 @@ if [ "$FORWARD_RULES" -eq 8 ]; then
   log_info "   ✓ f2b-dos-high (ochrana bandwidth)"
   log_info "   ✓ f2b-manualblock (permanentný block)"
   log_info "   ✓ f2b-recidive (30d recidivisti)"
-  log_info "   ℹ nginx-php-errors: len INPUT ochrana (nie v FORWARD, web/PHP vrstva) ⭐ NEW"
+  log_info "   ℹ nginx-php-errors + webshell-sweep: INPUT-only web ochrana"
 else
   log_warn "Očakávaných 8 pravidiel, nájdených $FORWARD_RULES"
 fi
@@ -458,7 +460,7 @@ echo "Konfigurácia je PERZISTENTNÁ - prežije reboot!"
 echo "IPv4 + IPv6 support aktívny!"
 echo "Recidive: 30-day timeout ✅"
 echo "FORWARD chain: ochrana MariaDB a Apache2 ✅"
-echo "nginx-php-errors: INPUT-only ochrana pre web/PHP vrstvu ✅"
+echo "nginx-php-errors + webshell-sweep: INPUT-only ochrana web vrstvy ✅"
 echo ""
 echo "Test:"
 echo "  sudo nft list set inet fail2ban-filter f2b-recidive | grep timeout"
