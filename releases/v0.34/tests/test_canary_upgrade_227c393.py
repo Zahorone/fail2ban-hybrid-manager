@@ -1,6 +1,10 @@
 import importlib.util
+import json
 import pathlib
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -29,4 +33,52 @@ assert '"restart", "nftables"' not in source
 assert module.TARGET_CHANGESET == "227c393"
 assert module.BACKUP_LABEL == "v034dev-to-227c393"
 
-print("PASS: 227c393 canary updater has narrow, non-destructive scope")
+# Exercise the exact minimal-package layout through preflight, apply and rollback
+# without touching the host or invoking Fail2Ban/nftables.
+with tempfile.TemporaryDirectory() as directory:
+    temporary = pathlib.Path(directory)
+    package = temporary / "f2b-v034-canary-227c393"
+    (package / "scripts").mkdir(parents=True)
+    (package / "payload").mkdir()
+    shutil.copy2(SCRIPT, package / "scripts" / SCRIPT.name)
+    shutil.copy2(ROOT / "filters/f2b-exploit-critical.conf", package / "payload/f2b-exploit-critical.conf")
+    shutil.copy2(ROOT / "filters/f2b-webshell-sweep.conf", package / "payload/f2b-webshell-sweep.conf")
+    shutil.copy2(ROOT / "config/webshell-sweep.local", package / "payload/99-webshell-sweep.local")
+    shutil.copy2(ROOT / "scripts/f2b-wrapper-v034.sh", package / "payload/f2b")
+
+    fixture = temporary / "root"
+    old = {
+        "etc/fail2ban/filter.d/f2b-exploit-critical.conf": b"old critical\n",
+        "usr/local/bin/f2b": b"old wrapper\n",
+        "etc/fail2ban/jail.local": b"local settings stay\n",
+        "etc/fail2ban/filter.d/site-highrisk.local": b"local override stays\n",
+        "var/lib/fail2ban/fail2ban.sqlite3": b"database stays\n",
+    }
+    for name, content in old.items():
+        path = fixture / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    state = fixture / "run/f2b-canary"
+    state.mkdir(parents=True)
+    (state / "bans.json").write_text(json.dumps({"sshd": ["192.0.2.8"], "recidive": ["2001:db8::8"]}))
+    (state / "nft.json").write_text('{"nftables": []}\n')
+
+    command = [sys.executable, str(package / "scripts" / SCRIPT.name), "--fixture-root", str(fixture)]
+    before = {name: (fixture / name).read_bytes() for name in old}
+    dry = subprocess.run(command, text=True, capture_output=True, check=True)
+    assert "No changes made" in dry.stdout
+    assert before == {name: (fixture / name).read_bytes() for name in old}
+
+    applied = subprocess.run(command + ["--apply"], text=True, capture_output=True, check=True)
+    backup = pathlib.Path(next(line.split(": ", 1)[1] for line in applied.stdout.splitlines() if line.startswith("Backup complete:")))
+    assert (fixture / "etc/fail2ban/jail.local").read_bytes() == old["etc/fail2ban/jail.local"]
+    assert (fixture / "etc/fail2ban/filter.d/site-highrisk.local").read_bytes() == old["etc/fail2ban/filter.d/site-highrisk.local"]
+    assert (fixture / "var/lib/fail2ban/fail2ban.sqlite3").read_bytes() == old["var/lib/fail2ban/fail2ban.sqlite3"]
+    assert (fixture / "etc/fail2ban/jail.d/99-webshell-sweep.local").is_file()
+
+    subprocess.run(command + ["--rollback", str(backup)], text=True, capture_output=True, check=True)
+    assert before == {name: (fixture / name).read_bytes() for name in old}
+    assert not (fixture / "etc/fail2ban/jail.d/99-webshell-sweep.local").exists()
+    assert not (fixture / "etc/fail2ban/filter.d/f2b-webshell-sweep.conf").exists()
+
+print("PASS: 227c393 minimal canary preflight, apply and rollback")
