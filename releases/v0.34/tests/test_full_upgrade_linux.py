@@ -3,6 +3,7 @@
 systemd/cron are deliberately simulated: this is NOT a VM/reboot test.
 """
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import sys
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -38,6 +40,11 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     package = next((temporary / 'package').iterdir())
     script = package / 'scripts/upgrade-v033-v034.py'
     legacy = REPO / 'releases/v0.33'
+    if '--pristine' in sys.argv:
+        data = subprocess.check_output(['git', '-C', str(REPO), 'archive', 'a88bacb', 'releases/v0.33'])
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            archive.extractall(temporary / 'pristine')
+        legacy = temporary / 'pristine/releases/v0.33'
     private_etc = temporary / 'private-etc'
     shutil.copytree('/etc', private_etc, symlinks=True)
     run('mount', '--bind', str(private_etc), '/etc')

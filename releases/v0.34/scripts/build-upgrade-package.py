@@ -34,7 +34,13 @@ def build(output):
     for target, source in mapping.items():
         previous = root.parent / 'v0.33' / source.relative_to(root)
         if source.name == 'f2b-wrapper-v034.sh': previous = root.parent / 'v0.33/scripts/f2b-wrapper-v033.sh'
-        known[str(target)] = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (previous, source) if p.is_file()]
+        digests = set()
+        for path in (previous, source):
+            relative = str(path.relative_to(repo))
+            for revision in git('log', '--format=%H', '--', relative).splitlines():
+                content = subprocess.run(['git', '-C', str(repo), 'show', revision + ':' + relative], capture_output=True)
+                if content.returncode == 0: digests.add(hashlib.sha256(content.stdout).hexdigest())
+        known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
                 'upgrade_from': ['0.33', '0.33-ipv6.1', '0.34-dev'], 'known_targets': known,
                 'files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)},
