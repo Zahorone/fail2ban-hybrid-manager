@@ -6,7 +6,7 @@ jobs:
   ipv6:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables shellcheck
       - name: Shell syntax
         run: find releases/v0.34 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n

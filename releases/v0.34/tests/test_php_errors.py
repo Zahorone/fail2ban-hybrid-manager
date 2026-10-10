@@ -1,4 +1,5 @@
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -45,11 +46,17 @@ with tempfile.TemporaryDirectory() as directory:
 
     if shutil.which("fail2ban-regex"):
         checked = subprocess.run(
-            ["fail2ban-regex", str(log), str(FILTER), "--print-all-matched"],
+            ["fail2ban-regex", str(log), str(FILTER), "--print-all-matched",
+             "--print-no-missed", "--print-no-ignored"],
             text=True,
             capture_output=True,
             check=True,
         )
+        # The CLI normally prints missed lines as well. Restrict evidence to
+        # matches and require exactly the two malicious records, so ordinary
+        # PHP errors appearing in diagnostics cannot cause false test failures.
+        summary = re.search(r"Lines:\s+5 lines,\s+0 ignored,\s+(\d+) matched,\s+(\d+) missed", checked.stdout)
+        assert summary and summary.groups() == ("2", "3"), checked.stdout
         assert "198.51.100.7" in checked.stdout
         assert "2001:db8::7" in checked.stdout
         assert "198.51.100.8" not in checked.stdout
