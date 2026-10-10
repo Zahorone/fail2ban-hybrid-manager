@@ -116,7 +116,7 @@ INSTALLTYPE="fresh"
 # Check if fail2ban is installed
 if command -v fail2ban-client >/dev/null 2>&1; then
   info "Fail2Ban detected: $(fail2ban-client --version | head -1)"
-  INSTALLTYPE="upgrade"
+  # A distribution Fail2Ban package is a prerequisite, not a managed install.
 fi
 
 # Check if nftables table exists
@@ -139,8 +139,13 @@ fi
 
 # Check for F2B wrapper
 if [ -x /usr/local/bin/f2b ]; then
+  INSTALLTYPE="upgrade"
   F2BVERSION=$(/usr/local/bin/f2b version --short 2>/dev/null | grep -oP 'v[0-9\.]+' || echo "unknown")
   info "F2B wrapper detected: $F2BVERSION"
+fi
+
+if [ -f /etc/fail2ban/jail.local ]; then
+  INSTALLTYPE="upgrade"
 fi
 
 # Check for docker-block

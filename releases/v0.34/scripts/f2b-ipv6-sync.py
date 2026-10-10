@@ -1,11 +1,13 @@
 #!/usr/bin/python3
 import datetime
+import fcntl
 import ipaddress
 import json
 import re
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 
 from fail2ban.client.csocket import CSocket
 
@@ -21,7 +23,7 @@ def call(command):
     return result[1]
 
 
-def snapshot():
+def snapshot(family=6):
     status = dict(call(['status']))
     jails = status['Jail list']
     if isinstance(jails, str):
@@ -37,7 +39,7 @@ def snapshot():
             if not match:
                 raise RuntimeError('Unexpected ban timestamp')
             address = ipaddress.ip_address(match[1])
-            if address.version != 6:
+            if address.version != family:
                 continue
             end = (float('inf') if int(match[3]) == -1 else
                    datetime.datetime.strptime(match[4], '%Y-%m-%d %H:%M:%S').timestamp())
@@ -70,13 +72,13 @@ def readset(table, name):
                 element = element['elem']['val']
             if not isinstance(element, str):
                 raise RuntimeError('Unsupported interval in ' + name + '; preserving all bans')
-            output[str(ipaddress.IPv6Address(element))] = (
+            output[str(ipaddress.ip_address(element))] = (
                 float('inf') if expiry is None else time.time() + expiry
             )
     return output
 
 
-def reconcile(desired, table, name):
+def reconcile(desired, table, name, prune=True):
     current = readset(table, name)
     # Extend shorter bans to the longest active jail expiry, without shortening others.
     for address, end in desired.items():
@@ -93,21 +95,48 @@ def reconcile(desired, table, name):
             command = 'delete element inet ' + table + ' ' + name + ' { ' + address + ' }\n' + command
         subprocess.run(['nft', '-f', '-'], input=command, text=True, check=True, capture_output=True)
     # Refresh authority before removing anything, to avoid racing a new ban.
-    for address in set(current) - set(desired):
-        fresh, recidive = snapshot()
-        active = recidive if name == 'f2b-recidive-v6' else fresh
+    for address in (set(current) - set(desired)) if prune else ():
+        fresh, recidive = snapshot(6 if name.endswith(('ipv6', '-v6')) else 4)
+        active = recidive if name.startswith('f2b-recidive') else fresh
         if address not in active:
-            nft('delete', 'element', 'inet', table, name, '{ ' + address + ' }')
+            nft('delete', 'element', 'inet', table, name, '{ ' + address + ' }', check=False)
+
+
+@contextmanager
+def sync_lock():
+    # Hook workers never query Fail2Ban while holding this lock. The daemon's
+    # socket remains available while the separate sync process reads bans.
+    with open('/run/lock/f2b-runtime-sync.lock', 'a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def hook_ban(address, bantime):
+    address = str(ipaddress.ip_address(address))
+    duration = int(bantime)
+    if duration != -1 and duration <= 0:
+        raise ValueError('Invalid ban duration')
+    end = float('inf') if duration == -1 else time.time() + duration
+    name = 'docker-banned-ipv6' if ':' in address else 'docker-banned-ipv4'
+    with sync_lock():
+        reconcile({address: end}, 'docker-block', name, prune=False)
 
 
 def main():
-    all_ips, recidive = snapshot()
-    if len(sys.argv) > 1 and sys.argv[1] == 'check':
-        print('Active IPv6 bans:', len(all_ips), 'recidive:', len(recidive))
+    if len(sys.argv) > 1 and sys.argv[1] == 'hook-ban':
+        hook_ban(sys.argv[2], sys.argv[3])
         return
-    reconcile(all_ips, 'docker-block', 'docker-banned-ipv6')
-    reconcile(recidive, 'fail2ban-filter', 'f2b-recidive-v6')
-    print('IPv6 sync OK:', len(all_ips), 'active addresses,', len(recidive), 'recidive addresses')
+    if len(sys.argv) > 1 and sys.argv[1] == 'check':
+        for family in (4, 6):
+            all_ips, recidive = snapshot(family)
+            print('Active IPv%d bans:' % family, len(all_ips), 'recidive:', len(recidive))
+        return
+    with sync_lock():
+        for family in (4, 6):
+            all_ips, recidive = snapshot(family)
+            reconcile(all_ips, 'docker-block', 'docker-banned-ipv%d' % family)
+            reconcile(recidive, 'fail2ban-filter', 'f2b-recidive' + ('-v6' if family == 6 else ''))
+            print('IPv%d sync OK:' % family, len(all_ips), 'active addresses,', len(recidive), 'recidive addresses')
 
 
 if __name__ == '__main__':

@@ -14,7 +14,7 @@ sendername = Fail2Ban Notifications
 # Whitelist
 # Add site-specific trusted public addresses in a local override. Never ship
 # production addresses in the public defaults.
-ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16
+ignoreip = 127.0.0.1/8 ::1
 
 # Global defaults
 findtime = 600

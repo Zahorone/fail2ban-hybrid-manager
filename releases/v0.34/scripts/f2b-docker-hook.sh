@@ -28,10 +28,13 @@ BANTIME_RAW="${4:-3600}"
 LOGFILE="/var/log/f2b-docker-sync.log"
 
 # Fail2Ban zvyčajne posiela bantime už ako sekundy; ak nie je číslo, fallback
-if [[ "$BANTIME_RAW" =~ ^[0-9]+$ ]]; then
+if [[ "$BANTIME_RAW" == -1 ]]; then
+  TIMEOUT="permanent (renewable 30d lease)"
+elif [[ "$BANTIME_RAW" =~ ^[0-9]+$ ]]; then
   TIMEOUT="${BANTIME_RAW}s"
 else
-  TIMEOUT="1h"
+  echo "Invalid bantime: $BANTIME_RAW" >&2
+  exit 2
 fi
 
 # Detect IP family
@@ -40,9 +43,6 @@ if [[ "$IP" == *:* ]]; then
 else
   SETNAME="docker-banned-ipv4"
 fi
-
-TABLE_FAMILY="inet"
-TABLE_NAME="docker-block"
 
 ts() { date -Is; }  # bez % -> jednoduché, stabilné
 
@@ -55,17 +55,15 @@ touch "$LOGFILE" 2>/dev/null || true
 
 case "$MODE" in
   ban)
-    # add (ignore if exists)
-    nft add element "$TABLE_FAMILY" "$TABLE_NAME" "$SETNAME" "{ $IP timeout $TIMEOUT }" 2>/dev/null || true
+    # Extend a shared ban to the longest expiry; -1 means permanent, maintained
+    # as a renewable lease. Failures propagate to Fail2Ban instead of vanishing.
+    /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py hook-ban "$IP" "$BANTIME_RAW"
     log_line "HOOK-BAN"
     ;;
   unban)
     # Keep a shared IPv6 ban until the runtime union has been checked.
     # Do not query Fail2Ban here: this hook runs inside its action worker.
-    if [[ "$IP" == *:* ]]; then log_line "HOOK-UNBAN-DEFERRED"; exit 0; fi
-    # delete (ignore if missing)
-    nft delete element "$TABLE_FAMILY" "$TABLE_NAME" "$SETNAME" "{ $IP }" 2>/dev/null || true
-    log_line "HOOK-UNBAN"
+    log_line "HOOK-UNBAN-DEFERRED"
     ;;
   *)
     echo "Usage: $0 {ban|unban} <ip> <jail> [bantime]" >&2

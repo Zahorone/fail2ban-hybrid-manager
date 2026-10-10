@@ -140,8 +140,7 @@ else
   info "Safe mode -> NOT deleting nft tables (upgrade-friendly)."
 fi
 
-# legacy chain cleanup (best-effort)
-nft flush chain ip filter DOCKER-USER 2>/dev/null || true
+# DOCKER-USER belongs to Docker/the administrator; never flush foreign chains.
 echo ""
 
 ################################################################################
@@ -213,4 +212,3 @@ fi
 info "Next steps:"
 echo " 1) Run installer: sudo bash INSTALL-ALL-v034.sh"
 echo ""
-

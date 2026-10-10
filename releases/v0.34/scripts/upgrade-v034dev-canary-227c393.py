@@ -2,7 +2,7 @@
 """Transactional v0.34-dev canary update to changeset 227c393."""
 from __future__ import annotations
 
-import argparse, ast, datetime as dt, hashlib, ipaddress, json, os, re, shutil, subprocess, sys, tarfile, tempfile
+import argparse, ast, datetime as dt, hashlib, ipaddress, json, os, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile
 from pathlib import Path
 
 RELEASE = "0.34-dev"
@@ -24,15 +24,18 @@ def sources(root):
     payload = root / "payload"
     if payload.is_dir():
         return {"critical": payload/"f2b-exploit-critical.conf", "sweep": payload/"f2b-webshell-sweep.conf",
-                "jail": payload/"99-webshell-sweep.local", "wrapper": payload/"f2b"}
+                "jail": payload/"99-webshell-sweep.local", "wrapper": payload/"f2b",
+                "sync": payload/"f2b-ipv6-sync.py", "hook": payload/"f2b-docker-hook"}
     return {"critical": root/"filters/f2b-exploit-critical.conf", "sweep": root/"filters/f2b-webshell-sweep.conf",
-            "jail": root/"config/webshell-sweep.local", "wrapper": root/"scripts/f2b-wrapper-v034.sh"}
+            "jail": root/"config/webshell-sweep.local", "wrapper": root/"scripts/f2b-wrapper-v034.sh",
+            "sync": root/"scripts/f2b-ipv6-sync.py", "hook": root/"scripts/f2b-docker-hook.sh"}
 
 def install_map(root, system_root=Path("/")):
     src = sources(root)
     dst = {"critical": "etc/fail2ban/filter.d/f2b-exploit-critical.conf",
            "sweep": "etc/fail2ban/filter.d/f2b-webshell-sweep.conf",
-           "jail": "etc/fail2ban/jail.d/99-webshell-sweep.local", "wrapper": "usr/local/bin/f2b"}
+           "jail": "etc/fail2ban/jail.d/99-webshell-sweep.local", "wrapper": "usr/local/bin/f2b",
+           "sync": "usr/local/sbin/f2b-ipv6-sync.py", "hook": "usr/local/sbin/f2b-docker-hook"}
     return {system_root/path: src[name] for name, path in dst.items()}
 
 def validate_payload(root):
@@ -49,6 +52,8 @@ def validate_payload(root):
         if re.search(r"^\s*flush\s+ruleset(?:\s|$)", path.read_text(errors="replace"), re.M):
             raise UpgradeError(f"Unsafe global flush: {path}")
     run("bash", "-n", str(src["wrapper"]))
+    run("bash", "-n", str(src["hook"]))
+    compile(src["sync"].read_text(), str(src["sync"]), "exec")
 
 def parse_jails(text):
     for line in text.splitlines():
@@ -114,7 +119,16 @@ def create_backup(base,root,bans,nft):
     out=base/f"{BACKUP_LABEL}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"; out.mkdir(parents=True,mode=0o700)
     existing=[p for p in backup_paths(root) if p.exists()]
     with tarfile.open(out/"system-files.tar","w") as archive:
-        for path in existing: archive.add(path,arcname=path.relative_to(root),recursive=True)
+        def exclude_sidecars(info):
+            return None if info.name.endswith((".sqlite3-wal", ".sqlite3-shm")) else info
+        for path in existing: archive.add(path,arcname=path.relative_to(root),recursive=True,filter=exclude_sidecars)
+        if root == Path("/"):
+            with tempfile.TemporaryDirectory(prefix="f2b-canary-db-") as temporary:
+                for database in (root/"var/lib/fail2ban").glob("*.sqlite3"):
+                    destination=Path(temporary)/database.name
+                    with sqlite3.connect(f"file:{database}?mode=ro",uri=True) as source:
+                        with sqlite3.connect(destination) as target: source.backup(target)
+                    archive.add(destination,arcname=database.relative_to(root))
     (out/"manifest.json").write_text(json.dumps({"paths":[str(p.relative_to(root)) for p in existing]},indent=2)+"\n")
     (out/"fail2ban-bans.json").write_text(json.dumps(bans,indent=2)+"\n")
     (out/"nft-ruleset.json").write_text(json.dumps(nft,indent=2)+"\n")
@@ -131,7 +145,7 @@ def atomic_install(source,target):
     target.parent.mkdir(parents=True,exist_ok=True); fd,name=tempfile.mkstemp(prefix=".canary-",dir=target.parent); staged=Path(name)
     try:
         with os.fdopen(fd,"wb") as out,source.open("rb") as inp: shutil.copyfileobj(inp,out); out.flush(); os.fsync(out.fileno())
-        os.chmod(staged,0o755 if "/usr/local/bin/" in str(target) else 0o644); os.replace(staged,target)
+        os.chmod(staged,0o755 if "/usr/local/bin/" in str(target) or "/usr/local/sbin/" in str(target) else 0o644); os.replace(staged,target)
     finally: staged.unlink(missing_ok=True)
 
 def deploy(mapping):
@@ -257,10 +271,13 @@ def verify_live(root,bans,before):
     validate_payload(root)
 
 def rollback(backup,mapping,root,fixture=False):
-    verify_backup(backup); bans=json.loads((backup/"fail2ban-bans.json").read_text()); restore_files(backup,mapping,root)
+    verify_backup(backup); bans=json.loads((backup/"fail2ban-bans.json").read_text())
+    if not fixture: run("systemctl","stop","fail2ban")
+    restore_files(backup,mapping,root)
     if not fixture:
-        run("fail2ban-client","-t"); result=run("fail2ban-client","reload",check=False)
-        if result.returncode: run("systemctl","restart","fail2ban")
+        for suffix in ("-wal","-shm"):
+            for sidecar in (root/"var/lib/fail2ban").glob("*.sqlite3"+suffix): sidecar.unlink(missing_ok=True)
+        run("fail2ban-client","-t"); run("systemctl","start","fail2ban")
         restore_bans(bans)
 
 def fixture_state(root):

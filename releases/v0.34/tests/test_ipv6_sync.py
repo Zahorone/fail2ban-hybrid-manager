@@ -43,6 +43,8 @@ def call(command):
 helper.call = call
 all_ips, recidive = helper.snapshot()
 assert set(all_ips) == {address} and all_ips[address] == recidive[address]
+v4, v4_recidive = helper.snapshot(4)
+assert set(v4) == {'192.0.2.1'} and v4_recidive
 # nft JSON timeout/expiry values use seconds, not netlink milliseconds.
 original_nft = helper.nft
 helper.nft = lambda *args: SimpleNamespace(stdout=helper.json.dumps({
@@ -90,7 +92,7 @@ helper.reconcile(recidive, 'fail2ban-filter', 'f2b-recidive-v6')
 # A stale snapshot must not remove a freshly active ban.
 helper.reconcile({}, 'docker-block', 'docker-banned-ipv6')
 assert address in helper.readset('docker-block', 'docker-banned-ipv6')
-helper.snapshot = lambda: ({}, {})
+helper.snapshot = lambda *args: ({}, {})
 helper.reconcile({}, 'docker-block', 'docker-banned-ipv6')
 assert not helper.readset('docker-block', 'docker-banned-ipv6')
 helper.reconcile({address: float('inf')}, 'docker-block', 'docker-banned-ipv6')
@@ -98,3 +100,17 @@ assert helper.readset('docker-block', 'docker-banned-ipv6')[address] > time.time
 helper.reconcile({address: float('inf')}, 'docker-block', 'docker-banned-ipv6')
 assert helper.readset('docker-block', 'docker-banned-ipv6')[address] > time.time() + 29 * 86400
 print('PASS: isolated nftables expiry extension, repeated sync, race guard, unban and permanent ban')
+
+# Both immediate hook families extend rather than ignore existing short bans.
+helper.nft('add', 'set', 'inet', 'docker-block', 'docker-banned-ipv4',
+           '{ type ipv4_addr; flags timeout; timeout 7d; }')
+for ip, name in [('192.0.2.1', 'docker-banned-ipv4'), (address, 'docker-banned-ipv6')]:
+    helper.nft('delete', 'element', 'inet', 'docker-block', name, '{ ' + ip + ' }', check=False)
+    helper.nft('add', 'element', 'inet', 'docker-block', name, '{ ' + ip + ' timeout 60s }')
+    helper.hook_ban(ip, '7200')
+    assert helper.readset('docker-block', name)[ip] > time.time() + 7100
+    helper.hook_ban(ip, '60')
+    assert helper.readset('docker-block', name)[ip] > time.time() + 7100
+    helper.hook_ban(ip, '-1')
+    assert helper.readset('docker-block', name)[ip] > time.time() + 29 * 86400
+print('PASS: real IPv4/IPv6 hook longest expiry and permanent lease')

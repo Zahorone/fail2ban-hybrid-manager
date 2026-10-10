@@ -20,6 +20,8 @@ assert set(mapping) == {
     pathlib.Path("/etc/fail2ban/filter.d/f2b-webshell-sweep.conf"),
     pathlib.Path("/etc/fail2ban/jail.d/99-webshell-sweep.local"),
     pathlib.Path("/usr/local/bin/f2b"),
+    pathlib.Path("/usr/local/sbin/f2b-ipv6-sync.py"),
+    pathlib.Path("/usr/local/sbin/f2b-docker-hook"),
 }
 assert all(source.is_file() for source in mapping.values())
 assert pathlib.Path("/etc/fail2ban/jail.local") not in mapping
@@ -134,6 +136,8 @@ with tempfile.TemporaryDirectory() as directory:
     shutil.copy2(ROOT / "filters/f2b-webshell-sweep.conf", package / "payload/f2b-webshell-sweep.conf")
     shutil.copy2(ROOT / "config/webshell-sweep.local", package / "payload/99-webshell-sweep.local")
     shutil.copy2(ROOT / "scripts/f2b-wrapper-v034.sh", package / "payload/f2b")
+    shutil.copy2(ROOT / "scripts/f2b-ipv6-sync.py", package / "payload/f2b-ipv6-sync.py")
+    shutil.copy2(ROOT / "scripts/f2b-docker-hook.sh", package / "payload/f2b-docker-hook")
 
     fixture = temporary / "root"
     old = {

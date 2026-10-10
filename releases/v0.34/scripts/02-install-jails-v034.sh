@@ -273,6 +273,7 @@ echo -n " f2b-docker-hook.sh ... "
 sudo cp "$SCRIPT_DIR/f2b-docker-hook.sh" /usr/local/sbin/f2b-docker-hook
 sudo chmod 0755 /usr/local/sbin/f2b-docker-hook
 sudo chown root:root /usr/local/sbin/f2b-docker-hook
+sudo install -o root -g root -m 0755 "$SCRIPT_DIR/f2b-ipv6-sync.py" /usr/local/sbin/f2b-ipv6-sync.py
 echo "✓ (/usr/local/sbin/f2b-docker-hook)"
 else
 log_error "f2b-docker-hook.sh NOT FOUND in $SCRIPT_DIR!"

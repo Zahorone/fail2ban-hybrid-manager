@@ -135,6 +135,11 @@ table inet docker-block {
 EOF
 
 CHANGED_NFT=0
+# Keep persisted blocked ports and operator rules when refreshing a live table.
+# Only the owned table is saved; Docker NAT and other tables are never copied.
+if nft list table inet docker-block >/dev/null 2>&1; then
+  nft -s list table inet docker-block > "$TMP_NFT"
+fi
 if write_if_changed "$TMP_NFT" "$DOCKER_BLOCK_NFT"; then
   CHANGED_NFT=1
 fi

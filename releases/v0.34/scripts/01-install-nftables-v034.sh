@@ -392,6 +392,12 @@ echo ""
 
 log_info "Kontrolujem /etc/nftables.conf..."
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+sudo mkdir -p /etc/systemd/system/nftables.service.d
+sudo install -m 0644 "$SCRIPT_DIR/../config/nftables-preserve-runtime.conf" \
+  /etc/systemd/system/nftables.service.d/90-f2b-preserve-runtime.conf
+sudo systemctl daemon-reload
+
 EXPECTED_CONF='#!/usr/sbin/nft -f
 
 # Fail2Ban nftables (v'$VERSION' - IPv4/IPv6, recidive 30d + FORWARD)

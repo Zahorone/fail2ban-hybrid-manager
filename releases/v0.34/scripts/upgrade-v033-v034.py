@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -85,6 +86,8 @@ def install_map(root: Path) -> dict[Path, Path]:
             Path("/usr/local/sbin/f2b-ipv6-sync.py"): root / "scripts/f2b-ipv6-sync.py",
             Path("/usr/local/libexec/f2b-report-filter.py"): root / "scripts/f2b-report-filter.py",
             Path("/etc/f2b/reporting.ini.example"): root / "config/reporting.ini.example",
+            Path("/etc/systemd/system/nftables.service.d/90-f2b-preserve-runtime.conf"):
+                root / "config/nftables-preserve-runtime.conf",
         }
     )
     return mapping
@@ -257,9 +260,19 @@ def create_backup(
     existing = [str(path) for path in SYSTEM_BACKUP_PATHS if (Path("/") / path).exists()]
     if existing:
         run(
-            "tar", "--acls", "--xattrs", "--numeric-owner", "-cpf",
+            "tar", "--acls", "--xattrs", "--numeric-owner",
+            "--exclude=*.sqlite3-wal", "--exclude=*.sqlite3-shm", "-cpf",
             str(backup / "system-files.tar"), "-C", "/", *existing,
         )
+    with tempfile.TemporaryDirectory(prefix="f2b-db-backup-") as temporary:
+        for database in Path("/var/lib/fail2ban").glob("*.sqlite3"):
+            relative = database.relative_to("/")
+            destination = Path(temporary) / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
+                with sqlite3.connect(destination) as target:
+                    source.backup(target)
+            run("tar", "-rpf", str(backup / "system-files.tar"), "-C", temporary, str(relative))
     (backup / "manifest.json").write_text(
         json.dumps({"release": RELEASE, "paths": existing}, indent=2) + "\n"
     )
@@ -357,14 +370,16 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     verify_backup(backup)
     mapping = mapping or install_map(package_root())
     bans = json.loads((backup / "fail2ban-bans.json").read_text())
+    # Restoring SQLite files requires stopping Fail2Ban, never Docker/nftables.
+    run("systemctl", "stop", "fail2ban")
     restore_files(backup, mapping)
+    for suffix in ("-wal", "-shm"):
+        for sidecar in Path("/var/lib/fail2ban").glob("*.sqlite3" + suffix):
+            sidecar.unlink(missing_ok=True)
+    run("systemctl", "daemon-reload")
     run("fail2ban-client", "-t")
-    reload_result = run("fail2ban-client", "reload", check=False)
-    if reload_result.returncode:
-        # Fail2Ban is the only service this workflow may restart, and only as
-        # rollback recovery. Docker and nftables are never restarted.
-        run("systemctl", "restart", "fail2ban")
-        run("fail2ban-client", "ping")
+    run("systemctl", "start", "fail2ban")
+    run("fail2ban-client", "ping")
     restore_missing_bans(bans)
     assert_bans_preserved(bans)
 
@@ -417,6 +432,7 @@ def main() -> int:
         print(f"Backup complete: {backup}")
         try:
             deploy(mapping)
+            run("systemctl", "daemon-reload")
             run("fail2ban-client", "-t")
             run("fail2ban-client", "reload")
             verify_after(bans, before_nft)

@@ -325,7 +325,7 @@ get_nft_ips() {
             else empty
             end
         ' 2>/dev/null \
-      | sed '/^$/d' \
+      | canonical_ips \
       | sort -u
   else
     # TITLE Fallback: regex-based parsing (current behavior)
@@ -333,10 +333,12 @@ get_nft_ips() {
       sudo nft list set $F2BTABLE "$set" 2>/dev/null \
         | grep -oE '[0-9a-fA-F:]+' \
         | grep -F ':' \
+        | canonical_ips \
         | sort -u
     else
       sudo nft list set $F2BTABLE "$set" 2>/dev/null \
         | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+        | canonical_ips \
         | sort -u
     fi
   fi
@@ -821,70 +823,9 @@ f2b_sync_check() {
 
 # f2b_sync_enhanced – dvojstranný sync s reportom
 f2b_sync_enhanced() {
-  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || return 1
-  log_header "F2B SYNC ENHANCED (bidirectional)"
-  local removed=0
-  local added=0
-
-  log_header "Phase 1 – Remove orphaned IPs"
-  for jail in "${JAILS[@]}"; do
-    local nft_set="${SETMAP[${jail}]}"
-    [ -z "${nft_set}" ] && continue
-
-    local f2b_ips nft_ips ip
-    f2b_ips=$(get_f2b_ips "${jail}") || return 1
-    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
-    nft_ips=$(get_nft_ips "${nft_set}")
-
-    local f2b_count nft_count
-    f2b_count=$(count_ips "${f2b_ips}")
-    nft_count=$(count_ips "${nft_ips}")
-    log_info "${jail} F2B=${f2b_count}, NFT=${nft_count}"
-
-    if [ -z "${f2b_ips}" ]; then
-      while read -r ip; do
-        [ -z "${ip}" ] && continue
-        sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
-      done <<<"${nft_ips}"
-    else
-      while read -r ip; do
-        [ -z "${ip}" ] && continue
-        if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
-          sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && removed=$((removed + 1))
-        fi
-      done <<<"${nft_ips}"
-    fi
-  done
-
-  echo
-  log_header "Phase 2 – Add missing IPs"
-  for jail in "${JAILS[@]}"; do
-    local nft_set="${SETMAP[${jail}]}"
-    [ -z "${nft_set}" ] && continue
-
-    local f2b_ips nft_ips ip
-    f2b_ips=$(get_f2b_ips "${jail}") || return 1
-    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
-    nft_ips=$(get_nft_ips "${nft_set}")
-
-    while read -r ip; do
-      [ -z "${ip}" ] && continue
-      if ! echo "${nft_ips}" | grep -Fxq "${ip}"; then
-        sudo nft add element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && added=$((added + 1))
-      fi
-    done <<<"${f2b_ips}"
-  done
-
-  echo
-  log_header "SYNC REPORT"
-  log_success "Removed orphaned : ${removed}"
-  log_success "Added missing    : ${added}"
-  if [ "${removed}" -gt 0 ] || [ "${added}" -gt 0 ]; then
-    log_success "Synchronization completed!"
-  else
-    log_warn "No changes needed"
-  fi
-  echo
+  # Fail2Ban owns per-jail sets. Reconcile shared Docker/recidive sets from
+  # runtime ban expiries for both families; never delete using a stale union.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py
 }
 
 # f2b_sync_force – alias na enhanced + check
@@ -895,54 +836,9 @@ f2b_sync_force() {
 
 # sync_silent – tichá F2B → nft sync pre cron
 sync_silent() {
-  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || return 1
-  local LOGFILE="/var/log/f2b-sync.log"
-  local CHANGES=0
-
-  echo "$(date '+%Y-%m-%d %H:%M:%S') Starting silent sync..." >>"$LOGFILE"
-
-  for jail in "${JAILS[@]}"; do
-    local nft_set="${SETMAP[${jail}]}"
-    [ -z "${nft_set}" ] && continue
-
-    local f2b_ips nft_ips ip
-
-    f2b_ips=$(get_f2b_ips "${jail}") || return 1
-    f2b_ips=$(printf "%s\n" "$f2b_ips" | grep -v ":" || true)
-    nft_ips=$(get_nft_ips "${nft_set}")
-
-    # Remove orphaned IPs z nft setu
-    if [ -z "${f2b_ips}" ]; then
-      while read -r ip; do
-        [ -z "${ip}" ] && continue
-        sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
-          && echo "$(date '+%Y-%m-%d %H:%M:%S') Removed orphan ${ip} from ${jail}" >>"$LOGFILE"
-      done <<<"${nft_ips}"
-    else
-      while read -r ip; do
-        [ -z "${ip}" ] && continue
-        if ! echo "${f2b_ips}" | grep -Fxq "${ip}"; then
-          sudo nft delete element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
-            && echo "$(date '+%Y-%m-%d %H:%M:%S') Removed orphan ${ip} from ${jail}" >>"$LOGFILE"
-        fi
-      done <<<"${nft_ips}"
-    fi
-
-    # Add missing IPs do nft setu
-    while read -r ip; do
-      [ -z "${ip}" ] && continue
-      if ! echo "${nft_ips}" | grep -Fxq "${ip}"; then
-        sudo nft add element ${F2BTABLE} "${nft_set}" "{ ${ip} }" 2>/dev/null && CHANGES=$((CHANGES + 1)) \
-          && echo "$(date '+%Y-%m-%d %H:%M:%S') Added ${ip} to ${jail}" >>"$LOGFILE"
-      fi
-    done <<<"${f2b_ips}"
-  done
-
-  if [ "${CHANGES}" -eq 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Sync OK - no changes" >>"$LOGFILE"
-  else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Sync completed - ${CHANGES} changes" >>"$LOGFILE"
-  fi
+  # Fail2Ban owns per-jail sets. Reconcile shared Docker/recidive sets from
+  # runtime ban expiries for both families; never delete using a stale union.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py
 }
 
 ################################################################################
@@ -1050,221 +946,9 @@ f2b_docker_verify() {
 
 # f2b_sync_docker_full – bidirectional union sync F2B ↔ docker-block (IPv4 + IPv6)
 f2b_sync_docker_full() {
-  log_header "F2B Docker-Block Bidirectional Sync"
-  echo
-
-  # Pre-sync: najprv zosynchronizuj F2B ↔ nft fail2ban-filter
-  log_info "Pre-sync: synchronizing Fail2Ban nftables..."
-  sync_silent
-  echo
-
-  if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
-    log_error "docker-block table NOT FOUND"
-    log_info "Install with: bash 03-install-docker-block-v04.sh"
-    echo
-    return 1
-  fi
-
-  local LOGFILE="/var/log/f2b-docker-sync.log"
-  sudo touch "$LOGFILE" 2>/dev/null || true
-  log_info "Starting docker-block sync (union of all F2B sets)..."
-  echo
-
-  # Jails/sety, ktoré vstupujú do unionu
-  local SETS=(
-    "f2b-sshd"
-    "f2b-sshd-slowattack"
-    "f2b-exploit-critical"
-    "f2b-webshell-sweep"
-    "f2b-dos-high"
-    "f2b-web-medium"
-    "f2b-nginx-recon-bonus"
-    "f2b-recidive"
-    "f2b-manualblock"
-    "f2b-fuzzing-payloads"
-    "f2b-botnet-signatures"
-    "f2b-anomaly-detection"
-    "f2b-nginx-php-errors"
-  )
-
-  ##############################################################################
-  # IPv4 SYNC – UNION F2B setov ↔ docker-banned-ipv4
-  ##############################################################################
-
-  # 1. UNION všetkých IPv4 z F2B setov
-  local F2BIPS
-  F2BIPS=$(
-    for SET in "${SETS[@]}"; do
-      sudo nft list set inet fail2ban-filter "${SET}" 2>/dev/null \
-        | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' || true
-    done | sort -u
-  )
-
-  # 2. Pridaj IP, ktoré sú vo F2B a nie sú v docker-block
-    while IFS= read -r IP; do
-      [ -z "$IP" ] && continue
-
-      # membership check (správna nft syntax)
-      # shellcheck disable=SC1083  
-      if ! sudo nft get element inet docker-block docker-banned-ipv4 { "$IP" } >/dev/null 2>&1; then
-        # ADD: bez explicitného timeoutu -> použije sa default timeout setu (u teba 7d)
-        sudo nft add element inet docker-block docker-banned-ipv4 { "$IP" } 2>/dev/null || true
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ADDED IPv4 $IP" | sudo tee -a "$LOGFILE" >/dev/null
-      fi
-    done <<<"$F2BIPS"
-
-  # 3. Odstráň IP, ktoré sú v docker-block, ale už nie sú v žiadnom F2B sete
-  local DOCKERIPS
-  DOCKERIPS=$(
-    sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-      | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-      | sort -u || true
-  )
-
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! echo "$F2BIPS" | grep -qx "$IP"; then
-      sudo nft delete element inet docker-block docker-banned-ipv4 "{ $IP }" 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') REMOVED IPv4 $IP (no longer in Fail2Ban)" \
-        | sudo tee -a "$LOGFILE" >/dev/null
-    fi
-  done <<<"$DOCKERIPS"
-
-  ##############################################################################
-  # IPv6 SYNC – UNION F2B setov ↔ docker-banned-ipv6
-  ##############################################################################
-
-  local REMOVED6=0
-  # IPv6 authority is the Fail2Ban runtime, not legacy alias sets.
-  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || {
-    log_error "IPv6 sync failed; existing bans preserved where possible"
-    return 1
-  }
-
-  ##############################################################################
-  # METRIKY – porovnanie počtov (jaily vs docker-block)
-  ##############################################################################
-
-  # F2B: spočítaj všetky IP naprieč jailmi (v4)
-  local TOTAL_JAIL_IPS=0
-  local ALL_JAIL_IPS
-  ALL_JAIL_IPS=$(
-    for jail in "${JAILS[@]}"; do
-      sudo fail2ban-client status "$jail" 2>/dev/null \
-        | grep "Banned IP list" \
-        | sed 's/.*Banned IP list:\s*//' \
-        | tr ' ,' '\n' \
-        | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || true
-    done
-  )
-
-  if [ -n "$ALL_JAIL_IPS" ]; then
-    TOTAL_JAIL_IPS=$(echo "$ALL_JAIL_IPS" | wc -l | tr -d ' ')
-  fi
-
-  local UNIQUE_IPS=0
-  local UNIQUE_LIST
-  UNIQUE_LIST=$(echo "$ALL_JAIL_IPS" | sort -u)
-  if [ -n "$UNIQUE_LIST" ]; then
-    UNIQUE_IPS=$(echo "$UNIQUE_LIST" | wc -l | tr -d ' ')
-  fi
-
-  local DUPLICATES=0
-  if [ "$TOTAL_JAIL_IPS" -gt "$UNIQUE_IPS" ]; then
-    DUPLICATES=$((TOTAL_JAIL_IPS - UNIQUE_IPS))
-  fi
-
-  # docker-block: presný count cez jq (IPv4)
-  local DOCKER_IP_COUNT=0
-  if jq_check_installed; then
-    DOCKER_IP_COUNT=$(
-      sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
-        | jq -r '.nftables[] | select(.set.elem != null) | .set.elem | length' 2>/dev/null \
-        | head -1
-    )
-    DOCKER_IP_COUNT=${DOCKER_IP_COUNT:-0}
-  else
-    DOCKER_IP_COUNT=$(
-      sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-        | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-        | wc -l | tr -d ' '
-    )
-  fi
-
-  log_header "SYNC METRICS"
-# --- F2B totals (IPv4 + IPv6) across all jails (duplicates across jails are expected) ---
-local ALL4 ALL6
-ALL4="$(
-  for jail in "${JAILS[@]}"; do
-    get_f2b_ips "$jail" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true
-  done
-)"
-ALL6="$(
-  for jail in "${JAILS[@]}"; do
-    get_f2b_ips "$jail" | grep -F ':' || true
-  done
-)"
-
-local TOTAL4 TOTAL6 UNIQUE4 UNIQUE6 DUP4 DUP6
-TOTAL4=0; TOTAL6=0; UNIQUE4=0; UNIQUE6=0; DUP4=0; DUP6=0
-
-if [ -n "$ALL4" ]; then
-  TOTAL4="$(echo "$ALL4" | wc -l | tr -d '[:space:]')"
-  UNIQUE4="$(echo "$ALL4" | sort -u | wc -l | tr -d '[:space:]')"
-  [ "$TOTAL4" -gt "$UNIQUE4" ] && DUP4=$((TOTAL4 - UNIQUE4))
-fi
-
-if [ -n "$ALL6" ]; then
-  TOTAL6="$(echo "$ALL6" | wc -l | tr -d '[:space:]')"
-  UNIQUE6="$(echo "$ALL6" | sort -u | wc -l | tr -d '[:space:]')"
-  [ "$TOTAL6" -gt "$UNIQUE6" ] && DUP6=$((TOTAL6 - UNIQUE6))
-fi
-
-# --- docker-block element counts (note: interval/auto-merge can make counts differ) ---
-local DOCKER4 DOCKER6
-DOCKER4=0
-DOCKER6=0
-
-if jq_check_installed; then
-  DOCKER4="$(sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
-    | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
-  DOCKER6="$(sudo nft -j list set inet docker-block docker-banned-ipv6 2>/dev/null \
-    | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
-else
-  DOCKER4="$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-    | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l | tr -d '[:space:]')"
-  DOCKER6="$(sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
-    | grep -oE '([0-9a-fA-F:]+)' | grep -F ':' | wc -l | tr -d '[:space:]')"
-fi
-
-DOCKER4="${DOCKER4:-0}"
-DOCKER6="${DOCKER6:-0}"
-
-loginfo "Jails IPv4: total=$TOTAL4 (dup=$DUP4, unique=$UNIQUE4)"
-loginfo "Jails IPv6: total=$TOTAL6 (dup=$DUP6, unique=$UNIQUE6)"
-loginfo "Docker-block IPv4 elements: $DOCKER4 (auto-merge may differ from unique IPs)"
-loginfo "Docker-block IPv6 elements: $DOCKER6 (auto-merge may differ from unique IPs)"
-
-# diff check (keep your ±5 tolerance)
-local DIFF4 DIFF6 DIFF4ABS DIFF6ABS
-DIFF4=$((UNIQUE4 - DOCKER4)); DIFF4ABS=${DIFF4#-}
-DIFF6=$((UNIQUE6 - DOCKER6)); DIFF6ABS=${DIFF6#-}
-
-if [ "$DOCKER4" -eq "$UNIQUE4" ]; then
-  logsuccess "✅ IPv4 perfect sync: $UNIQUE4 == $DOCKER4"
-elif [ "$DIFF4ABS" -le 5 ]; then
-  loginfo "ℹ️ IPv4 minor difference (±$DIFF4ABS) - normal due to nftables auto-merge"
-else
-  logwarn "⚠️ IPv4 significant difference: unique_jails=$UNIQUE4, docker-block=$DOCKER4"
-fi
-
-if [ "$DOCKER6" -eq "$UNIQUE6" ]; then
-  logsuccess "✅ IPv6 perfect sync: $UNIQUE6 == $DOCKER6"
-elif [ "$DIFF6ABS" -le 5 ]; then
-  loginfo "ℹ️ IPv6 minor difference (±$DIFF6ABS) - normal due to nftables auto-merge"
-else
-  logwarn "⚠️ IPv6 significant difference: unique_jails=$UNIQUE6, docker-block=$DOCKER6"
-fi
+  # Fail2Ban owns per-jail sets. Reconcile shared Docker/recidive sets from
+  # runtime ban expiries for both families; never delete using a stale union.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py
 }
 
 ################################################################################
@@ -1273,167 +957,9 @@ fi
 ################################################################################
 
 f2b_sync_docker() {
-  log_header "F2B Docker-Block Validation Sync (Consistency Check)"
-  echo ""
-
-  # Pre-sync: synchronizuj F2B ↔ nft fail2ban-filter
-  log_info "Pre-sync: synchronizing Fail2Ban nftables..."
-  sync_silent
-  echo ""
-
-  if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
-    log_error "docker-block table NOT FOUND"
-    log_info "Install with: bash 03-install-docker-block-v04.sh"
-    echo ""
-    return 1
-  fi
-
-  local LOGFILE="/var/log/f2b-docker-sync.log"
-  sudo touch "$LOGFILE" 2>/dev/null || true
-  log_info "Starting docker-block validation sync (union of all F2B sets)..."
-  log_info "NOTE: Immediate bans are handled by fail2ban hook (docker-sync-hook action)"
-  echo ""
-
-  local SETS=(
-    "f2b-sshd"
-    "f2b-sshd-slowattack"
-    "f2b-exploit-critical"
-    "f2b-webshell-sweep"
-    "f2b-dos-high"
-    "f2b-web-medium"
-    "f2b-nginx-recon-bonus"
-    "f2b-recidive"
-    "f2b-manualblock"
-    "f2b-fuzzing-payloads"
-    "f2b-botnet-signatures"
-    "f2b-anomaly-detection"
-    "f2b-nginx-php-errors"
-  )
-
-  ##############################################################################
-  # IPv4 VALIDATION – Remove orphaned IPs (docker-block IPs no longer in F2B)
-  ##############################################################################
-
-  # 1. Gather all IPv4 from F2B sets
-  local F2BIPS
-  F2BIPS=$(
-    for SET in "${SETS[@]}"; do
-      sudo nft list set inet fail2ban-filter "${SET}" 2>/dev/null \
-        | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' || true
-    done | sort -u
-  )
-
-  # 2. REMOVE orphaned IPs from docker-block (in docker-block but NOT in F2B)
-  local REMOVED=0
-  local DOCKERIPS
-  DOCKERIPS=$(
-    sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-      | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-      | sort -u || true
-  )
-
-  while IFS= read -r IP; do
-    [ -z "$IP" ] && continue
-    if ! echo "$F2BIPS" | grep -qx "$IP"; then
-      sudo nft delete element inet docker-block docker-banned-ipv4 "{ $IP }" 2>/dev/null || true
-      echo "$(date '+%Y-%m-%d %H:%M:%S') [SYNC] REMOVED IPv4 $IP (no longer in Fail2Ban)" \
-        | sudo tee -a "$LOGFILE" >/dev/null
-      REMOVED=$((REMOVED + 1))
-    fi
-  done <<<"$DOCKERIPS"
-
-  ##############################################################################
-  # IPv6 VALIDATION – Remove orphaned IPv6 addresses
-  ##############################################################################
-
-  local REMOVED6=0
-  # IPv6 authority is the Fail2Ban runtime, not legacy alias sets.
-  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py || {
-    log_error "IPv6 sync failed; existing bans preserved where possible"
-    return 1
-  }
-
-  ##############################################################################
-  # METRICS – Compare counts
-  ##############################################################################
-
-  local ALL4 ALL6
-  ALL4="$(
-    for jail in "${JAILS[@]}"; do
-      get_f2b_ips "$jail" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true
-    done
-  )"
-  ALL6="$(
-    for jail in "${JAILS[@]}"; do
-      get_f2b_ips "$jail" | grep -F ':' || true
-    done
-  )"
-
-  local TOTAL4 TOTAL6 UNIQUE4 UNIQUE6 DUP4 DUP6
-  TOTAL4=0; TOTAL6=0; UNIQUE4=0; UNIQUE6=0; DUP4=0; DUP6=0
-
-  if [ -n "$ALL4" ]; then
-    TOTAL4="$(echo "$ALL4" | wc -l | tr -d '[:space:]')"
-    UNIQUE4="$(echo "$ALL4" | sort -u | wc -l | tr -d '[:space:]')"
-    [ "$TOTAL4" -gt "$UNIQUE4" ] && DUP4=$((TOTAL4 - UNIQUE4))
-  fi
-
-  if [ -n "$ALL6" ]; then
-    TOTAL6="$(echo "$ALL6" | wc -l | tr -d '[:space:]')"
-    UNIQUE6="$(echo "$ALL6" | sort -u | wc -l | tr -d '[:space:]')"
-    [ "$TOTAL6" -gt "$UNIQUE6" ] && DUP6=$((TOTAL6 - UNIQUE6))
-  fi
-
-  local DOCKER4 DOCKER6
-  DOCKER4=0
-  DOCKER6=0
-
-  if jq_check_installed; then
-    DOCKER4="$(sudo nft -j list set inet docker-block docker-banned-ipv4 2>/dev/null \
-      | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
-    DOCKER6="$(sudo nft -j list set inet docker-block docker-banned-ipv6 2>/dev/null \
-      | jq -r '.nftables[] | select(.set.elem) | .set.elem | length' 2>/dev/null | head -1)"
-  else
-    DOCKER4="$(sudo nft list set inet docker-block docker-banned-ipv4 2>/dev/null \
-      | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l | tr -d '[:space:]')"
-    DOCKER6="$(sudo nft list set inet docker-block docker-banned-ipv6 2>/dev/null \
-      | grep -oE '([0-9a-fA-F:]+)' | grep -F ':' | wc -l | tr -d '[:space:]')"
-  fi
-
-  DOCKER4="${DOCKER4:-0}"
-  DOCKER6="${DOCKER6:-0}"
-
-  log_header "SYNC METRICS & VALIDATION REPORT"
-  loginfo "Jails IPv4: total=$TOTAL4 (dup=$DUP4, unique=$UNIQUE4)"
-  loginfo "Jails IPv6: total=$TOTAL6 (dup=$DUP6, unique=$UNIQUE6)"
-  loginfo "Docker-block IPv4 elements: $DOCKER4 (auto-merge may differ from unique IPs)"
-  loginfo "Docker-block IPv6 elements: $DOCKER6 (auto-merge may differ from unique IPs)"
-  loginfo "Removed (orphaned): IPv4=$REMOVED; IPv6 reconciled by runtime helper"
-  echo ""
-
-  # Diff check
-  local DIFF4 DIFF6 DIFF4ABS DIFF6ABS
-  DIFF4=$((UNIQUE4 - DOCKER4)); DIFF4ABS=${DIFF4#-}
-  DIFF6=$((UNIQUE6 - DOCKER6)); DIFF6ABS=${DIFF6#-}
-
-  if [ "$DOCKER4" -eq "$UNIQUE4" ]; then
-    logsuccess "✅ IPv4 perfect sync: $UNIQUE4 == $DOCKER4"
-  elif [ "$DIFF4ABS" -le 5 ]; then
-    loginfo "ℹ️ IPv4 minor difference (±$DIFF4ABS) - normal due to nftables auto-merge"
-  else
-    logwarn "⚠️ IPv4 significant difference: unique_jails=$UNIQUE4, docker-block=$DOCKER4"
-  fi
-
-  if [ "$DOCKER6" -eq "$UNIQUE6" ]; then
-    logsuccess "✅ IPv6 perfect sync: $UNIQUE6 == $DOCKER6"
-  elif [ "$DIFF6ABS" -le 5 ]; then
-    loginfo "ℹ️ IPv6 minor difference (±$DIFF6ABS) - normal due to nftables auto-merge"
-  else
-    logwarn "⚠️ IPv6 significant difference: unique_jails=$UNIQUE6, docker-block=$DOCKER6"
-  fi
-
-  echo ""
-  logsuccess "Validation sync completed. Hook handles immediate bans."
+  # Fail2Ban owns per-jail sets. Reconcile shared Docker/recidive sets from
+  # runtime ban expiries for both families; never delete using a stale union.
+  sudo /usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py
 }
 
 
