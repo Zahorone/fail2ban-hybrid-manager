@@ -25,7 +25,8 @@ def build(output):
     spec.loader.exec_module(module)
     mapping = module.install_map(root)
     files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py',
-             root / 'docs/UPGRADE-v033-v034.md', root / 'docs/MODULE-ARCHITECTURE.md'}
+             root / 'docs/UPGRADE-v033-v034.md', root / 'docs/MODULE-ARCHITECTURE.md',
+             root / 'docs/ACCESS-FILTER-SAFETY.md'}
     for source in files:
         relative = str(source.relative_to(repo))
         if git('hash-object', relative) != git('rev-parse', 'HEAD:' + relative):
@@ -40,6 +41,7 @@ def build(output):
             for revision in git('log', '--format=%H', '--', relative).splitlines():
                 content = subprocess.run(['git', '-C', str(repo), 'show', revision + ':' + relative], capture_output=True)
                 if content.returncode == 0: digests.add(hashlib.sha256(content.stdout).hexdigest())
+        digests.update(module.REVIEWED_PREVIOUS_SHA256.get(str(target), []))
         known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
                 'filter_override_policy': module.FILTER_OVERRIDE_POLICY,

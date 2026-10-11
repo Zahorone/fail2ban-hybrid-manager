@@ -40,6 +40,8 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_scan_review.py --require-fail2ban
       - name: Managed filter override coexistence contract
         run: /usr/bin/python3 releases/v0.34/tests/test_filter_contracts.py
+      - name: Conservative NPM botnet fuzzing recon and medium access filters
+        run: /usr/bin/python3 releases/v0.34/tests/test_access_filters.py --require-fail2ban
       - name: Full Fail2Ban candidate configuration test
         run: |
           candidate="$(mktemp -d)"
@@ -109,5 +111,7 @@ jobs:
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review
       - name: v0.34-dev scan-review local repairs coexistence and rollback
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review --v034dev
+      - name: Content-reviewed prior repair hashes upgrade and rollback
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --reviewed-repairs
       - name: Pristine v0.33 known-invalid baseline refusal and merged configuration
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --pristine

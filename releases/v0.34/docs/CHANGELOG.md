@@ -6,6 +6,14 @@ Development candidate; not approved for production deployment.
 
 ### Corrected
 
+- Replaced four historical blanket access filters with bounded, NPM-field-aware
+  scanner UA/traversal/private-file signatures. Generic bots, ordinary URL
+  encoding, application 404/429, WordPress core, HEAD monitoring and ACME are
+  not ban evidence. Added merged/live contracts and real regex regressions.
+- Added ten exact content-reviewed prior target hashes without relaxing unknown
+  override refusal; tests reconstruct nine minimal reviewed file variants and
+  preserve the independent critical `.local` throughout both rollback paths.
+
 - Managed October 11 credential/traversal and nested WordPress-core fixes;
   explicit preserve-and-validate coexistence for scan-review filter `.local`
   repairs, with config and live-daemon semantic contracts. Namespace CI covers

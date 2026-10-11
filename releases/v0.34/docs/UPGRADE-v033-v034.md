@@ -7,6 +7,11 @@ Fail2Ban (tested in CI with the 1.0.2-style client). Existing v0.34-dev can also
 be checked/reapplied. A custom database path is refused, not silently ignored.
 
 Architecture and module boundaries: see `MODULE-ARCHITECTURE.md` in this package.
+Before replacing locally repaired filters, read `ACCESS-FILTER-SAFETY.md`.
+The earlier a684ca7 archive contains historical broad access rules and must not
+be applied over those repairs. This candidate bounds the four access filters,
+checks their effective/live behavior and recognizes only exact content-reviewed
+prior target hashes. Unknown wrapper/action/helper contents still stop preflight.
 v0.34 is the planned common baseline for both servers, not evidence that both
 have already been upgraded. The unified install/update/module-management tool
 is reserved for local-only v0.40 development, not this upgrade's scope. A roadmap

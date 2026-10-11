@@ -16,6 +16,7 @@ import time
 import sys
 import re
 from scan_review_fixture import overrides
+from reviewed_legacy_fixture import verify_variants
 from unittest.mock import patch
 
 # Importing the archived updater for fault injection must not add a .pyc to
@@ -90,8 +91,24 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
             shutil.copy2(source, target)
             target.chmod(baseline.file_mode(target))
     preserved_overrides = {}
-    if '--scan-review' in sys.argv:
+    reviewed_repairs = '--reviewed-repairs' in sys.argv
+    reviewed_baseline = {}
+    if reviewed_repairs:
+        spec = importlib.util.spec_from_file_location('reviewed_baseline', script)
+        reviewed_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reviewed_module)
+        reviewed_baseline = verify_variants(REPO / 'releases/v0.34', reviewed_module.REVIEWED_PREVIOUS_SHA256)
+        for name, contents in reviewed_baseline.items():
+            path = Path(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
+            path.chmod(reviewed_module.file_mode(path))
+    if '--scan-review' in sys.argv or reviewed_repairs:
         for name, contents in overrides(REPO / 'releases/v0.34').items():
+            if reviewed_repairs and name == 'f2b-webshell-sweep.local': continue
+            if reviewed_repairs:
+                contents += ('\nignoreregex = ^(?!.*(?:/cgi-bin/|auto_prepend_file)).*booking/reschedule/.*$\n'
+                             '              ^(?!.*(?:/cgi-bin/|auto_prepend_file)).*/assets/.*$\n')
             path = Path('/etc/fail2ban/filter.d') / name
             path.write_text(contents)
             preserved_overrides[path] = path.read_bytes()
@@ -221,6 +238,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
         print(run(*command, '--rollback', str(backup)).stdout)
+        assert all(Path(path).read_bytes() == content for path, content in reviewed_baseline.items())
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
         assert Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists() == is_dev
         assert Path('/etc/cron.d/f2b-v034-sync').exists() == is_dev
@@ -247,6 +265,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert 'was rolled back' in failure_log.getvalue(), failure_log.getvalue()
         assert 'ROLLBACK ALSO FAILED' not in failure_log.getvalue()
         assert len(calls) == 3
+        assert all(Path(path).read_bytes() == content for path, content in reviewed_baseline.items())
         assert Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists() == is_dev
         assert_site_protections()
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
@@ -257,6 +276,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
         if preserved_overrides:
             print(f'PASS: representative scan-review .local coexistence and separate Apache guard preserved across apply/repeat/manual+automatic rollback; baseline v034dev={is_dev}')
+        if reviewed_repairs:
+            print('PASS: nine exact reviewed file hashes migrated and restored; minimal critical.local preserved; old sync helper represented by repo IPv6 equivalent, not a full server snapshot')
     except Exception:
         print('\n'.join(Path('/var/log/fail2ban.log').read_text(errors='replace').splitlines()[-80:]))
         raise

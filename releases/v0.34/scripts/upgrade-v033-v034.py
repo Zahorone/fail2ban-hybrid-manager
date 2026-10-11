@@ -27,12 +27,27 @@ sys.dont_write_bytecode = True
 
 
 RELEASE = "0.34-dev"
+# Content-reviewed prior repairs, not a normalization/bypass for unknown files.
+# No server configuration or secrets are embedded; each hash is target-specific.
+REVIEWED_PREVIOUS_SHA256 = {
+    "/etc/fail2ban/filter.d/f2b-botnet-signatures.conf": ["612877b0e7a785d63bca043a016fa087a3b669170aeb65db313805ee8990218a"],
+    "/etc/fail2ban/filter.d/f2b-fuzzing-payloads.conf": ["9e2c73dd272ad5c8cddea1bd81f79bb713f2b35556dd95a40bcacb7d58ec1dd6"],
+    "/etc/fail2ban/filter.d/f2b-web-medium.conf": ["3b9e6214b829ca787ef173d5e40dccdfd6ad7f0a74381c4a5c1349bbeccb52c4"],
+    "/etc/fail2ban/filter.d/nginx-recon-optimized.conf": ["751c2ea19b5b02b4e3027309a14da945f5e058647eb1ff8050098d15ce1d6811"],
+    "/etc/fail2ban/action.d/docker-sync-hook.conf": ["2f1cdb63ef98e72cbb5a2abb143aabb7e7fc3028e8f639eb0a7f52d153150002"],
+    "/etc/fail2ban/action.d/nftables-multiport.conf": ["9c552cb2fb83e42081486f898a5a3104736547c1c8432ad32cd754c6612b4c64"],
+    "/etc/fail2ban/jail.d/99-php-errors-mail.local": ["21ad5eb7214edb307180b54a06998e73f0e5d5d970b8ba5979538fa84f07ed94"],
+    "/usr/local/sbin/f2b-docker-hook": ["901903c9d24ddb5d50fa71c2bce54d557818367060c01dc181f2ed803e363271"],
+    "/usr/local/sbin/f2b-ipv6-sync.py": ["3383ceb7f198f8a789039cbb918b19ac38d02c7892c9425a0829aa34519db232"],
+    "/usr/local/bin/f2b": ["e6f8dba6f792ec62ae95c30430b2673ede39edf9733d83b692306a0585f6eed7"],
+}
 FILTER_OVERRIDE_POLICY = {
     "mode": "preserve-and-validate-effective",
     "marker": "scan-review-20261011",
     "paths": ["/etc/fail2ban/filter.d/f2b-exploit-critical.local",
               "/etc/fail2ban/filter.d/f2b-webshell-sweep.local"],
     "contract": "scan-review-20261011-v1",
+    "access_contract": "npm-access-v1",
     "marker_is_authentication": False,
     "apache": "outside-manager-transaction",
 }
@@ -425,6 +440,7 @@ def validate_effective_dump(dump: str) -> None:
         except (re.error, TypeError) as error:
             conflicts.append(f"[{jail}] cannot verify effective expressions: {error}")
     conflicts.extend(filter_contract_conflicts(commands))
+    conflicts.extend(access_filter_contract_conflicts(commands))
     if conflicts: raise UpgradeError("Effective configuration conflicts; inspect jail.local, jail.d/*.local and filter/action *.local:\n" + "\n".join(conflicts))
 
 
@@ -491,11 +507,66 @@ def filter_contract_conflicts(commands):
 def validate_live_filter_contracts():
     output = run("/usr/bin/python3", str(package_root() / "scripts/f2b-ipv6-sync.py"), "filter-contract").stdout
     commands = json.loads(output)
-    if not isinstance(commands, list) or len(commands) != 4:
+    if not isinstance(commands, list) or len(commands) not in {4, 6, 8, 10, 12}:
         raise UpgradeError("Invalid live filter contract response")
-    conflicts = filter_contract_conflicts(commands)
+    conflicts = filter_contract_conflicts(commands) + access_filter_contract_conflicts(commands)
     if conflicts: raise UpgradeError("Live Fail2Ban filter contract failed:\n" + "\n".join(conflicts))
-    print("PASS: live daemon critical/sweep semantic contracts, IPv4/IPv6")
+    print("PASS: live daemon critical/sweep/access semantic contracts, IPv4/IPv6")
+
+
+def access_filter_contract_cases():
+    """Bounded attacks and benign access requests; no site-specific defaults."""
+    benign = ("/", "/admin", "/test", "/hello", "/random", "/foo/bar", "/wp-admin",
+              "/wp-login.php", "/wp-json", "/wp-json/wp/v2/posts", "/wp-admin/admin-ajax.php",
+              "/health", "/status", "/ping", "/heartbeat", "/index.php/login",
+              "/booking/reschedule/abc", "/assets/vendor/jquery/jquery.min.js",
+              "/.well-known/acme-challenge/token", "/download/a%2fb", "/search?q=caf%C3%A9",
+              "/docs/bot/crawler/spider/sqlmap", "/news?test=foo&hello=world")
+    jails = ("f2b-botnet-signatures", "f2b-fuzzing-payloads", "f2b-web-medium", "nginx-recon-bonus")
+    for jail, target, status, method in itertools.product(jails, benign, (200, 404, 429, 444), ("GET", "HEAD")):
+        yield jail, target, status, method, "OAI-SearchBot/1.0", False
+    for tool in ("sqlmap/1.8", "Nikto/2.5", "Nmap Scripting Engine", "nuclei/3.0", "ffuf/2.0"):
+        yield "f2b-botnet-signatures", "/", 404, "GET", tool, True
+    for target in ("/x?file=%2e%2e%2fetc/passwd", "/../../etc/passwd", "/x%00.php",
+                   "/x?file=%5c%5cwindows", "/%252e%252e%252fetc/passwd"):
+        yield "f2b-fuzzing-payloads", target, 404, "GET", "Mozilla/5.0", True
+    for jail, target in itertools.product(("f2b-web-medium", "nginx-recon-bonus"),
+                                         ("/.git/config", "/.env", "/.env.local", "/wp-config.php", "/shell.php")):
+        yield jail, target, 404, "GET", "Mozilla/5.0", True
+
+
+def access_filter_contract_conflicts(commands):
+    compiled = {}
+    enabled = {command[1] for command in commands if len(command) >= 3 and command[0] in {"add", "set", "multi-set"}}
+    for jail, *_ in access_filter_contract_cases():
+        if jail not in enabled: continue
+        if jail in compiled: continue
+        expressions = {"addfailregex": [], "addignoreregex": []}
+        try:
+            for command in commands:
+                if len(command) == 4 and command[0] in {"set", "multi-set"} and command[1] == jail and command[2] in expressions:
+                    values = command[3] if isinstance(command[3], list) else [command[3]]
+                    expressions[command[2]].extend(re.compile(value.replace("<HOST>", r"(?:[0-9.]+|[0-9A-Fa-f:]+)")) for value in values)
+            compiled[jail] = expressions
+        except (re.error, TypeError) as error:
+            return [f"[{jail}] cannot compile effective access filter: {error}"]
+    conflicts = []
+    filters = {"nginx-recon-bonus": "nginx-recon-optimized"}
+    for jail, target, status, method, ua, expected in access_filter_contract_cases():
+        if jail not in compiled: continue
+        expressions = compiled[jail]
+        for host in ("192.0.2.7", "2001:db8::7"):
+            line = (f'[11/Oct/2026:12:00:00 +0000] - {status} {status} - {method} https example.invalid "{target}" '
+                    f'[Client {host}] [Length 10] [Gzip -] [Sent-to backend] "{ua}" "-"')
+            actual = (any(p.search(line) for p in expressions["addfailregex"]) and
+                      not any(p.search(line) for p in expressions["addignoreregex"]))
+            if actual != expected:
+                conflicts.append(f"[{jail}] access contract expected match={expected}: {method} {target} "
+                                 f"status={status} client={host}; inspect /etc/fail2ban/filter.d/"
+                                 f"{filters.get(jail, jail)}.local and jail/filter overrides")
+                if len(conflicts) >= 10: break
+        if len(conflicts) >= 10: break
+    return conflicts
 
 
 def create_backup(

@@ -9,11 +9,15 @@ import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
+from reviewed_legacy_fixture import verify_variants
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('upgrade_package', ROOT / 'scripts/upgrade-v033-v034.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+reviewed = verify_variants(ROOT, module.REVIEWED_PREVIOUS_SHA256)
+assert len(reviewed) == 9
+assert len(module.REVIEWED_PREVIOUS_SHA256) == 10  # old sync helper is hash-only, not published
 
 original = '#!/usr/sbin/nft -f\nflush ruleset\ninclude "/etc/nftables.d/*.nft"\n# site rule\n'
 safe = module.sanitized_nft_config(original)

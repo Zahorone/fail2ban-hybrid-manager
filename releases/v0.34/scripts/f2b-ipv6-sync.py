@@ -159,7 +159,11 @@ def hook_ban(address, bantime):
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == 'filter-contract':
         commands = []
-        for jail in ('f2b-exploit-critical', 'f2b-webshell-sweep'):
+        enabled = dict(call(['status']))['Jail list']
+        if isinstance(enabled, str): enabled = [name.strip() for name in enabled.split(',') if name.strip()]
+        for jail in ('f2b-exploit-critical', 'f2b-webshell-sweep', 'f2b-botnet-signatures',
+                     'f2b-fuzzing-payloads', 'f2b-web-medium', 'nginx-recon-bonus'):
+            if jail not in enabled: continue
             for key in ('failregex', 'ignoreregex'):
                 values = call(['get', jail, key])
                 if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
