@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import importlib.util
 import ipaddress
+import itertools
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,15 @@ sys.dont_write_bytecode = True
 
 
 RELEASE = "0.34-dev"
+FILTER_OVERRIDE_POLICY = {
+    "mode": "preserve-and-validate-effective",
+    "marker": "scan-review-20261011",
+    "paths": ["/etc/fail2ban/filter.d/f2b-exploit-critical.local",
+              "/etc/fail2ban/filter.d/f2b-webshell-sweep.local"],
+    "contract": "scan-review-20261011-v1",
+    "marker_is_authentication": False,
+    "apache": "outside-manager-transaction",
+}
 OWNED_NFT_TABLES = {"fail2ban-filter", "docker-block"}
 SYSTEM_BACKUP_PATHS = (
     Path("etc/fail2ban"),
@@ -146,6 +156,8 @@ def verify_package_manifest(root: Path) -> dict:
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema") != 1 or manifest.get("release") != RELEASE:
         raise UpgradeError("Unsupported package manifest")
+    if manifest.get("filter_override_policy") != FILTER_OVERRIDE_POLICY:
+        raise UpgradeError("Package filter override policy mismatch")
     expected = manifest["files"]
     actual = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
     if actual != set(expected) | {"UPGRADE-MANIFEST.json", "SHA256SUMS"}:
@@ -412,7 +424,78 @@ def validate_effective_dump(dump: str) -> None:
             if matches(benign): conflicts.append(f"[{jail}] effective filter matches benign WordPress request")
         except (re.error, TypeError) as error:
             conflicts.append(f"[{jail}] cannot verify effective expressions: {error}")
+    conflicts.extend(filter_contract_conflicts(commands))
     if conflicts: raise UpgradeError("Effective configuration conflicts; inspect jail.local, jail.d/*.local and filter/action *.local:\n" + "\n".join(conflicts))
+
+
+def filter_contract_cases():
+    """Managed semantic interface, independent of site override file hashes."""
+    credentials = [f"/.aws/{name}{suffix}" for name, suffix in itertools.product(
+        ("credentials", "config"), ("", ".bak", ".old", ".save", ".orig", "~"))]
+    credentials += ["/.boto", "/.s3cfg", "/.codeium/auth.json", "/.tabnine/credentials", "/rclone.conf"]
+    credentials += [f"/{prefix}{name}.json" for prefix, name in itertools.product(
+        ("", "config/", "keys/"), ("gcp-credentials", "google-credentials", "firebase-credentials",
+                                    "google-service-account", "service-account", "firebase-admin"))]
+    traversal = [f"/userfiles{endpoint}?{param}={dot}{sep}{dot}{sep}{target}"
+                 for endpoint, param, dot, sep, target in itertools.product(
+                     ("", "/x"), ("path", "file", "filename", "download"),
+                     ("..", "%2e%2e", ".%2e", "%2e."), ("/", "%2f"),
+                     (".env", ".env.local", "proc/self/environ", "proc%2fself%2fcmdline"))]
+    core = [f"/{prefix}{name}{query}" for prefix, name, query in itertools.product(
+        ("", "blog/", "tenant/a/"), ("index.php", "wp-login.php", "wp-admin/admin-ajax.php", "wp-cron.php"), ("", "?x=1"))]
+    benign = ["/search?q=../../.env", "/userfiles?path=../../images/a.jpg", "/userfiles?path=.env",
+              "/firebase.json", "/google-services.json", "/push_config.json", "/graphql",
+              "/.claude/settings.json", "/docs/service-account.json", "/config.php", "/solr/admin/cores"]
+    for target in credentials + traversal:
+        yield "f2b-exploit-critical", target, 404, True
+    for target, status in itertools.product(
+            ("/wp-content/plugins/hellopress/wp_filemanager.php", "/this_is_a_new_hello_world.php"), (301, 404, 444)):
+        yield "f2b-exploit-critical", target, status, True
+    for target in core + benign:
+        yield "f2b-exploit-critical", target, 404, False
+    for target in core:
+        yield "f2b-webshell-sweep", target, 404, False
+    for target, status in itertools.product(
+            ("/blog/not-wp-login.php", "/wp-content/plugins/evil/payload.phtml", "/tenant/a/payload.php"), (200, 301, 404, 444)):
+        yield "f2b-webshell-sweep", target, status, status == 404
+
+
+def filter_contract_conflicts(commands):
+    compiled = {}
+    conflicts = []
+    for jail in ("f2b-exploit-critical", "f2b-webshell-sweep"):
+        expressions = {"addfailregex": [], "addignoreregex": []}
+        try:
+            for command in commands:
+                if len(command) == 4 and command[0] in {"set", "multi-set"} and command[1] == jail and command[2] in expressions:
+                    values = command[3] if isinstance(command[3], list) else [command[3]]
+                    expressions[command[2]].extend(re.compile(value.replace("<HOST>", r"(?:[0-9.]+|[0-9A-Fa-f:]+)")) for value in values)
+            compiled[jail] = expressions
+        except (re.error, TypeError) as error:
+            conflicts.append(f"[{jail}] cannot compile effective filter: {error}")
+    for jail, target, status, expected in filter_contract_cases():
+        if jail not in compiled: continue
+        expressions = compiled[jail]
+        for host, method in itertools.product(("192.0.2.7", "2001:db8::7"), ("GET", "HEAD")):
+            line = f'[11/Oct/2026:12:00:00 +0000] - {status} {status} - {method} https example.invalid "{target}" [Client {host}]'
+            actual = (any(p.search(line) for p in expressions["addfailregex"]) and
+                      not any(p.search(line) for p in expressions["addignoreregex"]))
+            if actual != expected:
+                reason = "suppresses required probe" if expected else "matches excluded request"
+                conflicts.append(f"[{jail}] {reason}: {method} {target} status={status} client={host}; "
+                                 f"inspect /etc/fail2ban/filter.d/{jail}.local and jail/filter overrides")
+                if len(conflicts) >= 10: return conflicts + ["Further contract conflicts omitted; no overrides changed"]
+    return conflicts
+
+
+def validate_live_filter_contracts():
+    output = run("/usr/bin/python3", str(package_root() / "scripts/f2b-ipv6-sync.py"), "filter-contract").stdout
+    commands = json.loads(output)
+    if not isinstance(commands, list) or len(commands) != 4:
+        raise UpgradeError("Invalid live filter contract response")
+    conflicts = filter_contract_conflicts(commands)
+    if conflicts: raise UpgradeError("Live Fail2Ban filter contract failed:\n" + "\n".join(conflicts))
+    print("PASS: live daemon critical/sweep semantic contracts, IPv4/IPv6")
 
 
 def create_backup(
@@ -532,6 +615,8 @@ def verify_after(bans: dict[str, list[str]], before_nft: dict) -> None:
     if version != RELEASE:
         raise UpgradeError(f"Installed wrapper reports {version!r}, expected {RELEASE!r}")
     verify_release_runtime(bans, before_nft)
+    validate_live_filter_contracts()
+    validate_effective_dump(run("fail2ban-client", "-d").stdout)
     verifier = load_verifier()
     for jail in parse_jails(run("fail2ban-client", "status").stdout):
         if jail != "recidive": verifier.verify_nft_lifecycle(jail)
@@ -654,7 +739,13 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
     if re.search(r"(?m)^[^#\n]*(?:flush\s+ruleset|systemctl\s+(?:restart|reload)\s+(?:nftables|docker)|nft\s+-f)", cron):
         raise UpgradeError("Root crontab contains a firewall reload/flush command; review it before apply")
     for path in sorted(Path("/etc/fail2ban").rglob("*.local")):
-        if path not in mapping: print("PRESERVED local override: " + str(path))
+        if path not in mapping:
+            print("PRESERVED local override: " + str(path))
+            if str(path) in FILTER_OVERRIDE_POLICY["paths"]:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                marker = FILTER_OVERRIDE_POLICY["marker"] in path.read_text(errors="replace")
+                print(f"COEXISTENCE: {path} SHA256={digest} scan-review marker={marker}; "
+                      "contents preserved, compatibility requires effective contract checks")
     validate_live_firewall()
     validate_candidate(root, mapping)
     bans = snapshot_bans()

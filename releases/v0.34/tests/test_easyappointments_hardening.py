@@ -18,6 +18,7 @@ SPEC.loader.exec_module(MODULE)
 
 def layout(root: pathlib.Path) -> None:
     (root / "vendor").mkdir(parents=True)
+    (root / "config.php").write_text("<?php /* synthetic application config */\n")
     for name in (*MODULE.PRIVATE_DIRS, "uploads"):
         (root / "storage" / name).mkdir(parents=True)
 
@@ -51,12 +52,16 @@ with tempfile.TemporaryDirectory() as raw:
     backup = MODULE.make_backup(available, enabled, backups)
     manifest = json.loads((backup / "manifest.json").read_text())
     assert manifest["version"] == 1
-    assert len(manifest["entries"]) == 4
+    assert len(manifest["entries"]) == 6
     (available / MODULE.NAMES[0]).write_text("changed\n")
     (enabled / MODULE.NAMES[0]).unlink()
     MODULE.restore_backup(backup, configtest=False, reload_apache=False)
     assert (available / MODULE.NAMES[0]).read_text() == vendor
     assert (enabled / MODULE.NAMES[0]).is_symlink()
+    config = (available / MODULE.NAMES[2]).read_text()
+    assert f'<Directory "{app}">' in config
+    assert r'(?i)^config\.php(?:[.~].*)?$' in config
+    assert "Require all denied" in config
 
     (available / MODULE.NAMES[0]).write_text("foreign configuration\n")
     try:
@@ -87,6 +92,18 @@ with tempfile.TemporaryDirectory() as raw:
     assert all(path.exists() for path in probes.created)
     MODULE.cleanup_http_probes(probes.created)
     assert all(not path.exists() for path in probes.created)
+    MODULE.http_status = original_http_status
+
+    # HTTP contract checks private config plus unchanged home/login/assets.
+    probes = MODULE.ProbeState("synthetic", [], statuses, 200)
+    MODULE.http_status = lambda _base, path: statuses.get(path, 200 if path.endswith(".txt?probe=1") else 403)
+    MODULE.verify_http("http://127.0.0.1:8080", probes)
+    for broken in ("/config.php", "/", "/index.php/login", "/assets/vendor/jquery/jquery.min.js"):
+        MODULE.http_status = lambda _base, path, broken=broken: (500 if path == broken else
+            statuses.get(path, 200 if path.endswith(".txt?probe=1") else 403))
+        try: MODULE.verify_http("http://127.0.0.1:8080", probes)
+        except RuntimeError: pass
+        else: raise AssertionError(f"failed HTTP contract accepted: {broken}")
     MODULE.http_status = original_http_status
 
 assert MODULE.validate_backend_url("http://127.0.0.1:8080") == "http://127.0.0.1:8080"

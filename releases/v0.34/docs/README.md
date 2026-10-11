@@ -20,9 +20,12 @@ test gates have passed.
   require source CIDR, method, host, status and exact path; they do not change
   Fail2Ban filters or bans.
 - An optional, separately invoked Easy!Appointments Apache module can deny the
-  private Composer vendor tree, protect storage directories and constrain
+  private config.php/backup and Composer vendor files, protect storage directories and constrain
   script-like uploads. The main installer never enables it automatically; see
   `docs/EASYAPPOINTMENTS-APACHE-HARDENING.md`.
+- Core, application, webserver/proxy and deployment are separate selection axes;
+  future module contracts and safe local-override coexistence are documented in
+  `docs/MODULE-ARCHITECTURE.md`. No new modular installer UI is implied.
 - `f2b-exploit-critical` recognizes precise CGI traversal-to-shell and PHP-CGI
   `allow_url_include` plus `auto_prepend_file=php://input` requests in both NPM
   access logs and nginx error logs. One match receives a 365-day ban; historical

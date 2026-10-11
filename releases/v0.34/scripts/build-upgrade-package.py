@@ -25,7 +25,7 @@ def build(output):
     spec.loader.exec_module(module)
     mapping = module.install_map(root)
     files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py',
-             root / 'docs/UPGRADE-v033-v034.md'}
+             root / 'docs/UPGRADE-v033-v034.md', root / 'docs/MODULE-ARCHITECTURE.md'}
     for source in files:
         relative = str(source.relative_to(repo))
         if git('hash-object', relative) != git('rev-parse', 'HEAD:' + relative):
@@ -42,6 +42,7 @@ def build(output):
                 if content.returncode == 0: digests.add(hashlib.sha256(content.stdout).hexdigest())
         known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
+                'filter_override_policy': module.FILTER_OVERRIDE_POLICY,
                 'upgrade_from': ['0.33', '0.33-ipv6.1', '0.34-dev'], 'known_targets': known,
                 'files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)},
                 'targets': {str(p): str(s.relative_to(root)) for p, s in sorted(mapping.items())},

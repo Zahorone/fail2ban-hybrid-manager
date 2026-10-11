@@ -6,6 +6,16 @@ with systemd, an active `cron` service, both managed nft tables and distribution
 Fail2Ban (tested in CI with the 1.0.2-style client). Existing v0.34-dev can also
 be checked/reapplied. A custom database path is refused, not silently ignored.
 
+Architecture and module boundaries: see `MODULE-ARCHITECTURE.md` in this package.
+The manifest's `filter_override_policy` specifies preserve-and-validate-effective
+coexistence for scan-review `.local` repairs. Their marker/SHA-256 is reported,
+but neither the marker nor a guessed historical hash authorizes replacement.
+Both `.local` files remain byte-identical through apply/reapply; conflicts in
+effective critical/sweep behavior stop preflight with the relevant path and
+request. Typed live-daemon expressions are checked again after reload, inside
+the automatic rollback transaction. The original `.local` files are part of
+the existing complete Fail2Ban backup and restored by rollback.
+
 ## Scan review, 2026-10-11
 
 The sweep excludes exact WordPress core entry points (`index.php`, `wp-login.php`,

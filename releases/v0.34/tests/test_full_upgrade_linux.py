@@ -14,6 +14,8 @@ import tarfile
 import tempfile
 import time
 import sys
+import re
+from scan_review_fixture import overrides
 from unittest.mock import patch
 
 # Importing the archived updater for fault injection must not add a .pyc to
@@ -78,6 +80,50 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     # Synthetic, independent site override must survive every transaction.
     site = Path('/etc/fail2ban/filter.d/site-preserved.local')
     site.write_text('[Definition]\n# namespace fixture only\n')
+    is_dev = '--v034dev' in sys.argv
+    if is_dev:
+        spec = importlib.util.spec_from_file_location('baseline_v034', script)
+        baseline = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(baseline)
+        for target, source in baseline.install_map(package).items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            target.chmod(baseline.file_mode(target))
+    preserved_overrides = {}
+    if '--scan-review' in sys.argv:
+        for name, contents in overrides(REPO / 'releases/v0.34').items():
+            path = Path('/etc/fail2ban/filter.d') / name
+            path.write_text(contents)
+            preserved_overrides[path] = path.read_bytes()
+    apache = Path('/etc/apache2/conf-available/easyappointments-private-config.conf')
+    apache.parent.mkdir(parents=True, exist_ok=True)
+    apache.write_bytes((REPO / 'releases/v0.34/apache/easyappointments-private-config.conf').read_bytes())
+    apache_link = Path('/etc/apache2/conf-enabled/easyappointments-private-config.conf')
+    apache_link.parent.mkdir(parents=True, exist_ok=True)
+    apache_link.symlink_to(apache)
+    apache_before = apache.read_bytes()
+
+    def assert_site_protections():
+        assert all(path.read_bytes() == contents for path, contents in preserved_overrides.items())
+        assert apache.read_bytes() == apache_before and apache_link.is_symlink() and apache_link.resolve() == apache
+        if not preserved_overrides: return
+        for name, rows, count in (
+            ('f2b-exploit-critical', [('/.aws/credentials.bak', 404), ('/userfiles?path=../../proc/self/environ', 404),
+                                     ('/this_is_a_new_hello_world.php', 301), ('/search?q=../../.env', 404)], 6),
+            ('f2b-webshell-sweep', [('/blog/wp-login.php', 404), ('/tenant/a/wp-admin/admin-ajax.php', 404),
+                                  ('/blog/not-wp-login.php', 404), ('/wp-content/plugins/evil/payload.phtml', 404)], 4),
+        ):
+            # terminy-like rollback has no sweep jail/filter; the preserved .local
+            # remains ready for a later managed sweep installation.
+            filter_path = Path('/etc/fail2ban/filter.d') / (name + '.conf')
+            if not filter_path.exists(): continue
+            lines = [f'[11/Oct/2026:10:00:00 +0000] - {status} {status} - GET https example.invalid "{target}" [Client {ip}]'
+                     for target, status in rows for ip in ('192.0.2.7', '2001:db8::7')]
+            fixture = temporary / (name + '.log')
+            fixture.write_text('\n'.join(lines) + '\n')
+            output = run('fail2ban-regex', str(fixture), str(filter_path)).stdout
+            matched = re.search(r'Lines:\s+\d+ lines,\s+\d+ ignored,\s+(\d+) matched', output)
+            assert matched and int(matched[1]) == count, output
     original_jail = Path('/etc/fail2ban/jail.local').read_bytes()
     for name in ('auth.log', 'fail2ban.log', 'fail2ban-blocked-ips.txt'):
         (Path('/var/log') / name).touch()
@@ -145,11 +191,14 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         wait(lambda: '2001:db8::8' in run('fail2ban-client', 'get', 'manualblock', 'banip').stdout)
         command = ['/usr/bin/python3', str(script)]
         conflict = Path('/etc/fail2ban/filter.d/f2b-exploit-critical.local')
+        original_conflict = conflict.read_bytes() if conflict.exists() else None
         conflict.write_text('[Definition]\nignoreregex = .*\n')
         blocked = run(*command, check=False)
         assert blocked.returncode != 0 and 'suppress' in blocked.stderr
         assert conflict.read_text() == '[Definition]\nignoreregex = .*\n'
-        conflict.unlink()
+        if original_conflict is None: conflict.unlink()
+        else: conflict.write_bytes(original_conflict)
+        assert_site_protections()
         # Read-only preflight leaves existing site files/firewall unchanged.
         before = {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         result = run(*command)
@@ -159,6 +208,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         result = run(*command, '--apply', '--backup-dir', str(temporary / 'backups'))
         print(result.stdout)
         backup = Path(next(line.split(': ', 1)[1] for line in result.stdout.splitlines() if line.startswith('Backup complete:')))
+        assert_site_protections()
         assert json.loads((backup / 'fail2ban-ban-times.json').read_text())['manualblock']
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
         assert site.read_bytes() == before[site]
@@ -167,14 +217,17 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         # Reapplication must pass preflight with the now-installed v0.34 files.
         print(run(*command).stdout)
         print(run(*command, '--apply', '--backup-dir', str(temporary / 'repeat-backups')).stdout)
+        assert_site_protections()
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
         print(run(*command, '--rollback', str(backup)).stdout)
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
-        assert not Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists()
-        assert not Path('/etc/cron.d/f2b-v034-sync').exists()
+        assert Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists() == is_dev
+        assert Path('/etc/cron.d/f2b-v034-sync').exists() == is_dev
+        assert_site_protections()
         restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
-        assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8', '192.0.2.99'))
+        assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8'))
+        assert '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep' if is_dev else 'manualblock', 'banip').stdout
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         # Actual auto-rollback after a fault in the third file replacement.
         spec = importlib.util.spec_from_file_location('full_upgrade_fault', script)
@@ -194,12 +247,16 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert 'was rolled back' in failure_log.getvalue(), failure_log.getvalue()
         assert 'ROLLBACK ALSO FAILED' not in failure_log.getvalue()
         assert len(calls) == 3
-        assert not Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists()
+        assert Path('/etc/fail2ban/jail.d/99-webshell-sweep.local').exists() == is_dev
+        assert_site_protections()
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
         restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
-        assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8', '192.0.2.99'))
+        assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8'))
+        assert '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep' if is_dev else 'manualblock', 'banip').stdout
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
+        if preserved_overrides:
+            print(f'PASS: representative scan-review .local coexistence and separate Apache guard preserved across apply/repeat/manual+automatic rollback; baseline v034dev={is_dev}')
     except Exception:
         print('\n'.join(Path('/var/log/fail2ban.log').read_text(errors='replace').splitlines()[-80:]))
         raise

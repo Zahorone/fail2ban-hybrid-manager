@@ -157,6 +157,16 @@ def hook_ban(address, bantime):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'filter-contract':
+        commands = []
+        for jail in ('f2b-exploit-critical', 'f2b-webshell-sweep'):
+            for key in ('failregex', 'ignoreregex'):
+                values = call(['get', jail, key])
+                if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+                    raise RuntimeError('Unexpected typed filter response: ' + jail + '/' + key)
+                commands.append(['multi-set', jail, 'add' + key, values])
+        print(json.dumps(commands))
+        return
     if len(sys.argv) > 1 and sys.argv[1] == 'export':
         jails = dict(call(['status']))['Jail list']
         if isinstance(jails, str): jails = [j.strip() for j in jails.split(',') if j.strip()]

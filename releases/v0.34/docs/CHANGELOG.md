@@ -6,6 +6,16 @@ Development candidate; not approved for production deployment.
 
 ### Corrected
 
+- Managed October 11 credential/traversal and nested WordPress-core fixes;
+  explicit preserve-and-validate coexistence for scan-review filter `.local`
+  repairs, with config and live-daemon semantic contracts. Namespace CI covers
+  apply/reapply/manual and automatic rollback on repaired v0.33 and v0.34-dev
+  representatives without changing independent Apache guards or existing bans.
+- Defined separate core/application/webserver/deployment module boundaries for
+  a later opt-in installer. Added private config.php/backup protection to the
+  existing separately invoked Easy!Appointments Apache module, never the
+  universal Fail2Ban archive.
+
 - Integrated the successful development-canary runtime verifier into the
   standard upgrade transaction and read-only jail verification. Supports
   Fail2Ban 1.0.2 comma-separated action names, single-action family properties,

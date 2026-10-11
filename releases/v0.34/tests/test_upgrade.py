@@ -150,6 +150,8 @@ with patch.object(module, "require_root"), \
      patch.object(module, "assert_bans_preserved"), \
      patch.object(module, "nft_ruleset", return_value=base), \
      patch.object(module, "validate_live_firewall"), \
+     patch.object(module, "validate_effective_dump"), \
+     patch.object(module, "validate_live_filter_contracts"), \
      patch.object(module, "verify_release_runtime", side_effect=RuntimeError("Docker membership missing")) as verify, \
      patch.object(module, "rollback") as restore, \
      patch.object(sys, "argv", [str(SCRIPT), "--apply"]):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional transactional Apache hardening for Easy!Appointments.
 
-The default mode is read-only preflight. --apply installs only the two managed
+The default mode is read-only preflight. --apply installs only the three managed
 Apache snippets and their conf-enabled symlinks. Any failed config test, reload
 or HTTP verification restores their exact prior state.
 """
@@ -27,6 +27,7 @@ RELEASE_ROOT = SCRIPT.parents[1]
 NAMES = (
     "easyappointments-private-vendor.conf",
     "easyappointments-private-storage.conf",
+    "easyappointments-private-config.conf",
 )
 PRIVATE_DIRS = ("backups", "logs", "sessions", "cache")
 SCRIPT_SUFFIXES = ("php", "phtml", "php.jpg")
@@ -77,6 +78,10 @@ def http_status(base: str, path: str) -> int:
 
 
 def check_layout(app_root: Path) -> None:
+    if not app_root.is_absolute() or any(value in str(app_root) for value in ('"', '\n', '\r')):
+        raise RuntimeError("app root must be an absolute, Apache-safe filesystem path")
+    if not (app_root / "config.php").is_file():
+        raise RuntimeError(f"missing Easy!Appointments config.php: {app_root}")
     required = [app_root / "vendor", app_root / "storage" / "uploads"]
     required += [app_root / "storage" / name for name in PRIVATE_DIRS]
     missing = [str(path) for path in required if not path.is_dir()]
@@ -216,6 +221,7 @@ def cleanup_http_probes(created: list[Path]) -> None:
 def verify_http(backend: str, probes: ProbeState) -> None:
     marker = probes.marker
     forbidden = [
+        "/config.php", "/config.php?probe=1", "/CONFIG.PHP", "/config.php.bak", "/config.php~",
         "/vendor/composer/installed.json",
         "/vendor/composer/installed.json?probe=1",
         "/vendor/autoload.php",
@@ -270,6 +276,10 @@ def main() -> int:
         check_managed_scope(args.app_root, args.conf_available, args.conf_enabled)
         run("apache2ctl", "configtest")
         print("PASS: preflight; Easy!Appointments layout and Apache configuration are valid")
+        for available, enabled in targets(args.conf_available, args.conf_enabled):
+            print(f"PLAN: managed file {available}; enabled symlink {enabled} -> {available}")
+            print(render(available.name, args.app_root).decode(), end="")
+        print("PLAN: Apache configtest + reload + private/public HTTP checks; automatic rollback on failure")
         if not args.apply:
             print("No changes made. Re-run with --apply only after reviewing the application paths.")
             return 0
