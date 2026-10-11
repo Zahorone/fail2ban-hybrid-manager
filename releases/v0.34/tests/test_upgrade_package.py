@@ -8,16 +8,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import os
 from unittest.mock import patch
-from reviewed_legacy_fixture import verify_variants
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('upgrade_package', ROOT / 'scripts/upgrade-v033-v034.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-reviewed = verify_variants(ROOT, module.REVIEWED_PREVIOUS_SHA256)
-assert len(reviewed) == 9
-assert len(module.REVIEWED_PREVIOUS_SHA256) == 10  # old sync helper is hash-only, not published
 
 original = '#!/usr/sbin/nft -f\nflush ruleset\ninclude "/etc/nftables.d/*.nft"\n# site rule\n'
 safe = module.sanitized_nft_config(original)
@@ -41,6 +38,47 @@ with tempfile.TemporaryDirectory() as directory:
         assert target.read_text() == 'unknown site override\n'
         target.write_bytes(source.read_bytes())
         module.audit_targets(ROOT, {target: source})  # repeated apply
+
+    # Private deployment approvals use synthetic files, never server exports.
+    target.write_text('synthetic reviewed prior installer\n')
+    approved = hashlib.sha256(target.read_bytes()).hexdigest()
+    review = directory / 'private-review.json'
+    package = directory / 'generic-package'
+    package.mkdir()
+    data = {'schema': 1, 'reviewed': True, 'package_commit': 'synthetic-commit',
+            'targets': {str(target): approved}}
+    review.write_text(json.dumps(data))
+    review.chmod(0o600)
+    manifest = {'source_commit': 'synthetic-commit', 'known_targets': {}}
+    original_stat = Path.stat
+    def root_owned(path, *args, **kwargs):
+        result = original_stat(path, *args, **kwargs)
+        if path == review:
+            fields = list(result)
+            fields[4] = 0  # model root ownership on non-Linux test hosts
+            return os.stat_result(fields)
+        return result
+    with patch.object(Path, 'stat', root_owned), patch.object(module, 'verify_package_manifest', return_value=manifest):
+        module.audit_targets(package, {target: source}, review)
+        target.write_bytes(source.read_bytes())
+        module.audit_targets(package, {target: source}, review)  # idempotent reapply
+        for field, value in (('package_commit', 'other-commit'), ('reviewed', False),
+                             ('targets', {'/unmanaged/synthetic': approved})):
+            changed = dict(data, **{field: value})
+            review.write_text(json.dumps(changed))
+            try: module.audit_targets(package, {target: source}, review)
+            except module.UpgradeError: pass
+            else: raise AssertionError('Invalid private approval was accepted: ' + field)
+        review.write_text(json.dumps(data))
+        review.chmod(0o644)
+        try: module.audit_targets(package, {target: source}, review)
+        except module.UpgradeError: pass
+        else: raise AssertionError('Public-readable private review was accepted')
+        review.chmod(0o600)
+        target.write_text('unreviewed later change\n')
+        try: module.audit_targets(package, {target: source}, review)
+        except module.UpgradeError: pass
+        else: raise AssertionError('Changed reviewed target was accepted')
 
     old = directory / 'jail.d/existing.local'
     new = directory / 'jail.d/new.local'

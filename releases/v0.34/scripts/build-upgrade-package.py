@@ -41,7 +41,6 @@ def build(output):
             for revision in git('log', '--format=%H', '--', relative).splitlines():
                 content = subprocess.run(['git', '-C', str(repo), 'show', revision + ':' + relative], capture_output=True)
                 if content.returncode == 0: digests.add(hashlib.sha256(content.stdout).hexdigest())
-        digests.update(module.REVIEWED_PREVIOUS_SHA256.get(str(target), []))
         known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
                 'filter_override_policy': module.FILTER_OVERRIDE_POLICY,

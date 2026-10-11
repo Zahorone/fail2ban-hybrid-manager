@@ -10,8 +10,9 @@ Architecture and module boundaries: see `MODULE-ARCHITECTURE.md` in this package
 Before replacing locally repaired filters, read `ACCESS-FILTER-SAFETY.md`.
 The earlier a684ca7 archive contains historical broad access rules and must not
 be applied over those repairs. This candidate bounds the four access filters,
-checks their effective/live behavior and recognizes only exact content-reviewed
-prior target hashes. Unknown wrapper/action/helper contents still stop preflight.
+checks their effective/live behavior. Unknown wrapper/action/helper contents
+still stop preflight. Server-specific compatibility review/adaptation is private,
+outside this generic package and repository.
 v0.34 is the planned common baseline for both servers, not evidence that both
 have already been upgraded. The unified install/update/module-management tool
 is reserved for local-only v0.40 development, not this upgrade's scope. A roadmap
@@ -60,6 +61,15 @@ checks are not a digital signature: trust the package's source independently.
 ```sh
 sudo /usr/bin/python3 scripts/upgrade-v033-v034.py
 ```
+
+Unknown locally edited managed targets still require a separate private content
+review. An operator may explicitly pass `--local-review /PRIVATE/REVIEW.json` to
+both preflight and apply. The root-only file is bound to this package's exact
+commit and exact prior file bytes; it is not generated from unknown files by
+the upgrader, embedded in the manifest, or bundled for other installations.
+Preserved `.local` files do not need adoption, and all effective/runtime safety
+checks still apply. See `ACCESS-FILTER-SAFETY.md` for its generic schema. Keep
+that private file alongside deployment records, never in Git/CI or the package.
 
 This performs read-only checks of the installed system and uses temporary files
 for the merged configuration/persistence candidates. It does not install files,

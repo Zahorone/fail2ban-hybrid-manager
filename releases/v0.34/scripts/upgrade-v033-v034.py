@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tarfile
@@ -27,20 +28,6 @@ sys.dont_write_bytecode = True
 
 
 RELEASE = "0.34-dev"
-# Content-reviewed prior repairs, not a normalization/bypass for unknown files.
-# No server configuration or secrets are embedded; each hash is target-specific.
-REVIEWED_PREVIOUS_SHA256 = {
-    "/etc/fail2ban/filter.d/f2b-botnet-signatures.conf": ["612877b0e7a785d63bca043a016fa087a3b669170aeb65db313805ee8990218a"],
-    "/etc/fail2ban/filter.d/f2b-fuzzing-payloads.conf": ["9e2c73dd272ad5c8cddea1bd81f79bb713f2b35556dd95a40bcacb7d58ec1dd6"],
-    "/etc/fail2ban/filter.d/f2b-web-medium.conf": ["3b9e6214b829ca787ef173d5e40dccdfd6ad7f0a74381c4a5c1349bbeccb52c4"],
-    "/etc/fail2ban/filter.d/nginx-recon-optimized.conf": ["751c2ea19b5b02b4e3027309a14da945f5e058647eb1ff8050098d15ce1d6811"],
-    "/etc/fail2ban/action.d/docker-sync-hook.conf": ["2f1cdb63ef98e72cbb5a2abb143aabb7e7fc3028e8f639eb0a7f52d153150002"],
-    "/etc/fail2ban/action.d/nftables-multiport.conf": ["9c552cb2fb83e42081486f898a5a3104736547c1c8432ad32cd754c6612b4c64"],
-    "/etc/fail2ban/jail.d/99-php-errors-mail.local": ["21ad5eb7214edb307180b54a06998e73f0e5d5d970b8ba5979538fa84f07ed94"],
-    "/usr/local/sbin/f2b-docker-hook": ["901903c9d24ddb5d50fa71c2bce54d557818367060c01dc181f2ed803e363271"],
-    "/usr/local/sbin/f2b-ipv6-sync.py": ["3383ceb7f198f8a789039cbb918b19ac38d02c7892c9425a0829aa34519db232"],
-    "/usr/local/bin/f2b": ["e6f8dba6f792ec62ae95c30430b2673ede39edf9733d83b692306a0585f6eed7"],
-}
 FILTER_OVERRIDE_POLICY = {
     "mode": "preserve-and-validate-effective",
     "marker": "scan-review-20261011",
@@ -191,15 +178,44 @@ def verify_package_manifest(root: Path) -> dict:
     return manifest
 
 
-def audit_targets(root: Path, mapping: dict[Path, Path]) -> None:
-    known = verify_package_manifest(root)["known_targets"]
+def read_local_review(path: Path, root: Path, mapping: dict[Path, Path], manifest: dict) -> dict:
+    """Explicit private per-deployment approval; never embedded in a package."""
+    path = path.absolute()
+    if path.is_symlink() or path.parent.resolve() != path.parent:
+        raise UpgradeError("Local review must be a regular file without symlink parents")
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o077:
+        raise UpgradeError("Local review must be root-owned and readable/writable only by root")
+    if root.resolve() in path.resolve().parents:
+        raise UpgradeError("Local review must be outside the generic package")
+    value = json.loads(path.read_text())
+    if (not isinstance(value, dict) or value.get("schema") != 1 or value.get("reviewed") is not True
+            or value.get("package_commit") != manifest.get("source_commit")):
+        raise UpgradeError("Local review must explicitly approve this exact package commit")
+    targets = value.get("targets")
+    if not isinstance(targets, dict) or not targets:
+        raise UpgradeError("Local review must specify non-empty exact target SHA256 values")
+    for target, digest in targets.items():
+        if Path(target) not in mapping or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise UpgradeError("Invalid local review target or SHA256: " + target)
+        current = hashlib.sha256(Path(target).read_bytes()).hexdigest() if Path(target).is_file() else None
+        installed = hashlib.sha256(mapping[Path(target)].read_bytes()).hexdigest()
+        if current not in {digest, installed}:
+            raise UpgradeError("Local reviewed contents changed or disappeared: " + target)
+    return targets
+
+
+def audit_targets(root: Path, mapping: dict[Path, Path], review_file: Path | None = None) -> None:
+    manifest = verify_package_manifest(root)
+    known = manifest["known_targets"]
+    approved = read_local_review(review_file, root, mapping, manifest) if review_file else {}
     conflicts = []
     for target, source in mapping.items():
         if target.is_symlink() or target.parent.resolve() != target.parent:
             conflicts.append(str(target) + ": symlink target/parent requires manual review")
         elif target.exists() and target.read_bytes() != source.read_bytes():
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
-            if digest not in known.get(str(target), []):
+            if digest not in known.get(str(target), []) and approved.get(str(target)) != digest:
                 conflicts.append(str(target) + ": unknown local contents SHA256=" + digest)
     if conflicts:
         raise UpgradeError("Local target conflicts (nothing overwritten):\n" + "\n".join(conflicts))
@@ -787,7 +803,7 @@ def validate_multiport(multiport: Path) -> None:
             raise UpgradeError("Unknown local nftables-multiport.conf; review migration before apply")
 
 
-def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str]], dict]:
+def preflight(root: Path, mapping: dict[Path, Path], review_file: Path | None = None) -> tuple[dict[str, list[str]], dict]:
     require_commands(("bash", "crontab", "fail2ban-client", "nft", "systemctl", "tar", "/usr/bin/python3", "/usr/bin/flock", "/usr/bin/logger"))
     if not Path("/etc/fail2ban/jail.local").is_file():
         raise UpgradeError("Missing /etc/fail2ban/jail.local")
@@ -799,7 +815,7 @@ def preflight(root: Path, mapping: dict[Path, Path]) -> tuple[dict[str, list[str
         raise UpgradeError("Fail2Ban is not responding")
     validate_dbfile(run("fail2ban-client", "get", "dbfile").stdout)
     validate_package(root, mapping)
-    audit_targets(root, mapping)
+    audit_targets(root, mapping, review_file)
     run("systemctl", "is-active", "--quiet", "cron")
     version = run("/usr/local/bin/f2b", "version", "--short").stdout.strip().lstrip("v")
     if version not in {"0.33", "0.33-ipv6.1", RELEASE}: raise UpgradeError("Unsupported installed wrapper version: " + version)
@@ -830,6 +846,7 @@ def main() -> int:
     mode.add_argument("--apply", action="store_true", help="perform the upgrade after preflight")
     mode.add_argument("--rollback", type=Path, metavar="BACKUP", help="restore a backup created by this tool")
     parser.add_argument("--backup-dir", type=Path, default=Path("/var/backups/f2b-v034"))
+    parser.add_argument("--local-review", type=Path, help="private root-only approvals outside this package, bound to its exact commit")
     args = parser.parse_args()
     try:
         require_root()
@@ -844,7 +861,7 @@ def main() -> int:
             rollback(args.rollback, mapping)
             print(f"PASS: rollback restored {args.rollback}")
             return 0
-        bans, before_nft = preflight(root, mapping)
+        bans, before_nft = preflight(root, mapping, args.local_review)
         print(f"PASS: preflight; {len(bans)} jails and {sum(map(len, bans.values()))} active bans captured")
         if not args.apply:
             print("No changes made. Re-run with --apply only in the approved maintenance window.")

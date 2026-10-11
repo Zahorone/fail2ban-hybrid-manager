@@ -22,7 +22,7 @@ Do not apply the earlier a684ca7 archive to replace these repaired filters.
 - `f2b-web-medium`: matches bounded sensitive/exploit request targets in NPM
   access records. The stock jail reads `fallback_access.log`, so nginx error-log
   rate-limit lines are not relevant. No status alone, including 404/429/444, is
-enough to count; generic admin/application routes are allowed.
+  enough to count; generic admin/application routes are allowed.
 
 Effective contracts cover these four access jails only when enabled. They do not
 enable a deliberately disabled optional jail or change its installed logpaths.
@@ -36,28 +36,34 @@ not fix or assert safety of every other historical filter in the project.
 
 ## Upgrade compatibility and evidence
 
-`REVIEWED_PREVIOUS_SHA256` lists ten target-specific, content-reviewed prior
-repairs: these four filters, two action variants, binary-safe mail, the old
-IPv6 sync/hook and wrapper. The builder incorporates only those exact hashes
-into `known_targets`. It does not normalize comments/whitespace on arbitrary
-files, approve any file with similar keywords, or bypass unknown-file refusal.
-The wrapper diff is formatting plus reporting selection, not firewall behavior.
-Old hook/sync semantics are superseded by the existing v0.34 shared-family union
-and locking. Locally supplied critical `.local` remains outside the install map
-and is backed up/preserved; no live ban is automatically withdrawn.
+The generic builder recognizes only source-controlled historical versions of
+its own installation files. It does not embed server-specific hash allowlists,
+normalize arbitrary comments/whitespace or approve files with similar keywords.
+Unknown installed files remain conflicts. Any private deployment adaptation
+must be reviewed outside the repository and distributed upgrade archive; the
+generic installer must never silently adopt a server snapshot. Preserved local
+overrides remain outside the install map, are backed up and are not automatically
+deleted. No live ban is automatically withdrawn.
+
+For an explicitly content-reviewed deployment only, `--local-review /PRIVATE/FILE`
+accepts a separate root-owned mode-0600 JSON file outside the package. It must
+declare schema 1, `reviewed: true`, the exact `package_commit` from the manifest,
+and `targets` mapping managed absolute paths to their currently reviewed SHA256.
+No file is generated or approved automatically. Unknown target paths, changed
+contents, a different package commit, symlinks or unsafe permissions are refused.
+Only exact reviewed contents are allowed; effective configuration, filter,
+firewall, backup and rollback checks still run. This private file must never be
+committed, uploaded, printed into public logs or included in generic archives.
 
 The manifest declares `access_contract: npm-access-v1`. Both merged candidate
 configuration and typed regexes from the live daemon are checked for required
 probes and benign application/monitoring cases. A broad `.local` that restores
 blanket matching fails with the jail, sample and relevant override path.
 
-CI uses anonymized requests and nine byte-exact reviewed prior file variants
-(including a wrapper reconstructed from its reviewed diff), not a full server
-snapshot. The old sync helper is checksum-approved from its reviewed source;
-the namespace baseline uses its repository IPv6 semantic equivalent. Critical
-`.local` byte-preservation is exercised with a minimal structural/rule fixture,
-not a published copy of the full production file. Apply/reapply/manual and
-automatic rollback check restored file bytes, active bans and foreign NAT.
+Generic regex tests use synthetic application/probe cases, not exported server
+configurations, scripts, diffs or hash allowlists. Server-specific diagnostics
+and compatibility tests belong only in a separate private local workspace and
+must not be committed, pushed, uploaded to CI or included in generic archives.
 
 Real fail2ban-regex/Fail2Ban/nftables are tested in Linux namespaces; systemd/cron
 are simulated. This is not proof of a full server configuration, external IPv6

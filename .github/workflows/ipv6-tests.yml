@@ -111,7 +111,7 @@ jobs:
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review
       - name: v0.34-dev scan-review local repairs coexistence and rollback
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review --v034dev
-      - name: Content-reviewed prior repair hashes upgrade and rollback
-        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --reviewed-repairs
+      - name: Synthetic private per-deployment review and rollback
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --local-review-fixture
       - name: Pristine v0.33 known-invalid baseline refusal and merged configuration
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --pristine
