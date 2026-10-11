@@ -1,200 +1,171 @@
 # 🚀 Fail2Ban Hybrid Manager
 
-Fail2Ban Hybrid Manager is a production-ready toolkit for integrating Fail2Ban with nftables (IPv4 + IPv6) and Docker, designed for hardened, repeatable servers – now at **v0.33 PHP Error Detection & Docker Auto-Sync Edition**.
+Fail2Ban Hybrid Manager integrates Fail2Ban with nftables **IPv4 + IPv6** and
+Docker, with detection filters, ban synchronization, reporting and recovery tools.
 
-It provides full IPv4/IPv6 dual-stack protection with critical Docker-block improvements and **universal PHP error detection** for all PHP applications (WordPress, Laravel, Symfony, Magento, EasyAppointment, custom apps, etc.).
+The current source baseline is **v0.34-dev — Transactional Upgrade & Publication
+Safety Edition**. It is a development candidate, **not an RC or final production
+release**. Historical v0.33 downloads do not contain the current source fixes.
 
 ## What this project provides
 
-- A curated set of **12 Fail2Ban jails** and detection filters for SSH and web applications
-- ⭐ **nginx-php-errors Jail (NEW)** – Universal PHP error detection for all PHP applications (WordPress, Laravel, Symfony, Magento, EasyAppointment, custom apps)
-- 🌐 **Full IPv4/IPv6 dual-stack** – 24 nftables sets with complete protocol coverage
-- 🔄 **HTTP/HTTPS backward compatibility** – filters work with both protocols
-- A dual‑stack nftables ruleset (IPv4 + IPv6) managed via exportable `.nft` files
-- 🐋 **Full Docker protection** – banned IPs are dropped before reaching Docker containers (PREROUTING)
-- 🔄 **Docker Auto-Sync Cron v0.4 (CRITICAL)** – Every 1 minute, prevents bans from clearing on container restart ⚡
-- A management wrapper (`f2b`) with 50+ commands for:
-  - inspecting jails and bans
-  - synchronizing Fail2Ban ↔ nftables ↔ docker-block
-  - managing manual bans and unbans across all jails
-  - controlling Docker‑exposed ports and IP blocking
-  - real-time monitoring and dashboards
-- 🚀 NPM Nginx Proxy Manager support (Force SSL, HSTS, HTTP/2)
-- 📦 Self-contained production release packages
-- ✅ **Clean install support** – works on fresh servers without existing Fail2Ban
-- 🔄 **Auto-sync cron** – Docker containers stay protected automatically
+- 🌐 **Dual-stack actions** — family-aware nftables actions and separate recidive sets.
+- 🐋 **Docker protection** — synchronization of the union of active jail bans;
+  an address shared by another jail must not disappear prematurely on unban.
+- 🛡️ **Precise web detection** — critical PHP-CGI/RCE, credential-path and traversal
+  indicators, plus missing-webshell probes with WordPress-safe exceptions.
+- 📧 **Evidence mail** — nginx error-log evidence remains readable with binary
+  bytes. Ordinary PHP warnings, fatals and generic HTTP 5xx alone are not attacks.
+- 📊 **Reporting** — configurable health-probe exclusions affect reports,
+  not filters, whitelists or enforcement.
+- 🛠️ **Management wrapper** — jail/ban inspection, manual bans, synchronization,
+  Docker diagnostics and reports.
+- 📦 **Controlled upgrade package** — preflight, private backup, verification,
+  automatic recovery on apply failure and explicit manual rollback.
+- 🔒 **Publication safeguards** — checks for staged files, source and built packages.
 
-## IPv6 maintenance patch
-
-The source tree includes fixes for premature IPv6 Docker unbans, IPv4-only
-recidive actions, and wrapper IPv6 diagnostics. See
-[the patch and upgrade notes](releases/v0.33/docs/IPV6-FIX.md). Existing v0.33
-release downloads do not contain these source changes.
+See the [v0.34 guide](releases/v0.34/docs/README.md) and
+[access-filter safety contract](releases/v0.34/docs/ACCESS-FILTER-SAFETY.md).
+Canonical filters, actions and product scripts are intentionally public.
 
 ## Releases
 
-- **v0.33** (Latest) ⭐ **PHP Error Detection & Docker Auto-Sync**: 
-  - ✨ Added 12th jail: `nginx-php-errors` (PHP fatals + HTTP 5xx)
-  - 🐳 Docker-Block v0.4 with critical auto-sync cron (1 min)
-  - 🌐 24 nftables sets (12 IPv4 + 12 IPv6)
-  - 🛠️ Wrapper v0.33 with 50+ functions
-  - 📧 Interactive installer (Email/Network/Docker config)
-  - Safe upgrade from v0.31 (preserves all bans)
-  - ✅ Verified on: WordPress, Laravel, Symfony, Magento, EasyAppointment, custom PHP apps
+- **v0.34-dev** — current development baseline: transactional upgrade/rollback,
+  dual-stack/Docker regressions, conservative filters, reporting and mail fixes.
+- **v0.33** — historical PHP Error Detection & Docker Auto-Sync package.
+- **v0.31 / v0.30** — earlier immediate-ban and one-click bundles.
+- **v0.22 / v0.21 / v0.20** — earlier Docker, HTTP/HTTPS and IPv6 work.
 
-- **v0.31** – Immediate Docker Ban Edition: immediate docker-block bans via f2b-docker-hook.sh, wrapper v0.32, validate cron (11 jails, 22 sets, 22 INPUT, 6 FORWARD)
-
-- **v0.30** – First fully one‑click production bundle (safe pre-cleanup, Docker-block v0.4 + auto-sync, wrapper v0.30 s attack analysis)
-
-- **v0.24 / v0.22** – Older production bundles (recidive 30d, 11 jails, Docker integrácia)
-
-- **v0.21** – HTTP/HTTPS backward compatibility, Force SSL podpora
-
-- **v0.20** – Full IPv6 support
-
-Pre detailný popis aktuálneho stable release:
-
-- `releases/v0.33/README.md` – Fail2Ban + nftables v0.33 – PHP Error Detection Edition
-- `releases/v0.33/CHANGELOG.md` – Detailed version history
-- `releases/v0.33/MIGRATION-GUIDE.md` – Upgrade path from v0.31
-- `releases/v0.33/PACKAGE-INFO.txt` – Package info a upgrade paths
+Green CI does not promote a development candidate to a release. Disposable-host
+clean install, representative upgrade/rollback, reboot persistence, external
+IPv4/IPv6 Docker traffic and canary observation remain release gates. See
+[validation scope](releases/v0.34/docs/CANARY-VALIDATION.md).
 
 ## Repository layout
 
-```
+```text
+.github/workflows/       # Regression and publication checks
+scripts/                # Generic publication gate and optional Git hook
+docs/                   # Repository-wide publication policy
 releases/
-├── v0.33/ # Current stable PHP Error Detection bundle ⭐
-│ ├── INSTALL-ALL-v033.sh
-│ ├── scripts/ (8 install scripts)
-│ ├── filters/ (12 filter configs)
-│ ├── actions/
-│ ├── config/
-│ ├── f2b-wrapper-v033.sh
-│ ├── README.md
-│ ├── CHANGELOG.md
-│ ├── MIGRATION-GUIDE.md
-│ ├── PACKAGE-INFO.txt
-│ └── LICENSE
-├── v0.31/ # Previous one-click production bundle
+├── v0.34/               # Current development candidate
+│   ├── VERSION
+│   ├── INSTALL-ALL-v034.sh
+│   ├── scripts/         # Installers, wrapper, helpers, builder/upgrader
+│   ├── filters/
+│   ├── actions/
+│   ├── config/
+│   ├── tests/           # Synthetic fixtures and Linux namespace tests
+│   └── docs/            # README, upgrade, safety and validation guides
+├── v0.33/               # Historical package and migration documentation
+├── v0.31/
 ├── v0.30/
-├── v0.24/
-├── v0.22/
-├── v0.21/
-└── v0.20/
+└── ...
 ```
 
 ## Usage
 
-By default, email notification addresses (`destemail`, `sender`) and `ignoreip` in `config/jail.local` are set to generic values. For production, update them before running the installer.
+Review and pin a trusted source commit before testing. Replace `REVIEWED_COMMIT`
+with that commit; a moving branch is not an immutable release.
 
-### Interactive Setup
-
-The installer guides you through configuration interactively:
-
-- **Email Notifications** – detects mail service, prompts for admin email, shows which jails send alerts
-- **WAN/Server IP Auto-Detection** – auto-detects your server IP, optionally adds it to Fail2Ban ignore list (prevents self-blocking)
-- **Docker Configuration** – Configure Docker subnet whitelist (ignoreip)
-- **No manual editing needed** – all configuration happens during installation
-
-For most users, the recommended way is to download the packaged **v0.33** release:
-
-```bash
-wget https://github.com/Zahorone/fail2ban-hybrid-manager/releases/download/v0.33/fail2ban-hybrid-manager-v0.33.tar.gz
-
-tar -xzf fail2ban-hybrid-manager-v0.33.tar.gz
-cd v0.33/
-
-sudo bash INSTALL-ALL-v033.sh
+```sh
+git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git
+cd fail2ban-hybrid-manager
+git checkout --detach REVIEWED_COMMIT
 ```
 
-Safe test mode on production (no firewall changes yet):
+### 🧪 Clean install — disposable host only
 
-```bash
-sudo bash INSTALL-ALL-v033.sh --cleanup-only
+Use a fresh supported Debian/Ubuntu test host with required dependencies/services.
+Review local mail, log paths, Docker networking and whitelists.
+Shipped whitelists contain loopback only; do not commit site-specific settings.
+
+```sh
+cd releases/v0.34
+sudo bash INSTALL-ALL-v034.sh
 ```
 
-After installation you can use:
+This **changes the host**. The installer refuses existing managed installations
+and unsafe global nftables flush configuration. Do not use cleanup flags as a
+dry run or upgrade path. Full clean-install/reboot validation is still required.
 
-```bash
-sudo f2b status
-sudo f2b monitor watch
-sudo f2b list banned
-sudo f2b ban 192.168.1.100
-sudo f2b unban 192.168.1.100
-sudo f2b sync docker          # Sync banned IPs to docker-block
-sudo f2b docker info          # Docker-block table status
-sudo f2b docker dashboard     # Live monitoring
-sudo f2b report json          # Generate report
-sudo f2b doctor               # System diagnostics
+### 🔄 Existing v0.33 / v0.34-dev — staged upgrade package
+
+From a clean committed repository checkout, build the candidate outside it:
+
+```sh
+python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-upgrade.tar.gz
+python3 scripts/check-publication-safety.py --archive /tmp/f2b-upgrade.tar.gz
 ```
 
-For full installation and troubleshooting instructions, follow:
+The builder refuses to overwrite an existing archive. Verify its SHA-256
+against the separately trusted build result, extract into a new directory and
+run `sha256sum -c SHA256SUMS` inside the extracted package. Then:
 
-- `releases/v0.33/README.md`
-- `releases/v0.33/MIGRATION-GUIDE.md` (for v0.31 → v0.33 upgrade)
-- `releases/v0.33/PACKAGE-INFO.txt`
+```sh
+sudo /usr/bin/python3 scripts/upgrade-v033-v034.py
+# Only after successful preflight and maintenance-window approval:
+sudo /usr/bin/python3 scripts/upgrade-v033-v034.py --apply
+# If recovery is needed, use the exact backup path printed during apply:
+sudo /usr/bin/python3 scripts/upgrade-v033-v034.py --rollback /EXACT/PRINTED/BACKUP
+```
 
-## What's New in v0.33
+The default command is read-only preflight with temporary candidate files.
+Unknown managed-file edits, incompatible effective overrides and an original
+configuration that cannot restart safely stop the upgrade. Historical pristine
+v0.33 has a PHP filter parsing defect: CI checks safe refusal, not a successful
+runtime upgrade of that broken baseline.
 
-- ⭐ **nginx-php-errors Jail (NEW)** – Universal PHP error detection for **ALL PHP applications**
-  - Detects: PHP fatal errors, parse errors, HTTP 5xx patterns
-  - Works with: WordPress, Drupal, Joomla, Laravel, Symfony, Magento, EasyAppointment, custom PHP apps
-  - Compatible with nginx reverse proxy (X-Real-IP headers)
-  - Docker-aware (persistent bans across container restarts)
+Apply backs up configuration, helpers, consistent database data and active bans
+before replacement. It preserves local `jail.local`/whitelists and validates
+preserved overrides, without a global firewall flush or Docker/nftables restart.
+Post-backup failures attempt rollback; rollback can also fail. Keep independent
+console access and private backups. Exact remaining ban-time restoration and
+uninterrupted service are not guaranteed.
 
-- 🐳 **Docker-Block v0.4 (CRITICAL)** – Auto-sync cron every 1 minute
-  - Prevents bans from clearing on container restart
-  - Zero downtime protection for Docker deployments
-  - Log: `/var/log/f2b-docker-sync.log`
+Read the complete [upgrade and rollback contract](releases/v0.34/docs/UPGRADE-v033-v034.md)
+before apply. Do not substitute the clean installer for this workflow.
 
-- 🌐 **24 nftables Sets** – Full IPv4/IPv6 coverage (12 jails × 2 protocols)
-  - All 12 jails protected on both protocols
-  - IPv6 address logging and ban tracking
+## ✅ Tests and publication safety
 
-- 🛠️ **Wrapper v0.33** – 50+ functions with enhanced monitoring
-  - Enhanced logging and diagnostics
-  - Better error handling during high load
+```sh
+python3 scripts/test-publication-safety.py
+python3 scripts/check-publication-safety.py
+python3 scripts/check-publication-safety.py --staged
+python3 releases/v0.34/tests/test_release_static.py
+```
 
-- 📧 **Interactive Installer v0.33**
-  - Restored Email/Network configuration with auto-detection
-  - Auto-detect mail service for notifications
-  - Auto-detect server IP (optional whitelist)
-  - Pre-cleanup with nftables backup
+An optional local hook can be installed with
+`sh scripts/install-publication-hook.sh`; existing hooks are not replaced.
+The [CI workflow](.github/workflows/ipv6-tests.yml) also exercises real Fail2Ban
+and nftables in Linux namespaces, upgrade/reapply/rollback, synthetic local
+overrides, filters and binary-safe evidence mail. Upgrade fixtures simulate
+systemd and cron; they do not prove a real reboot or external Docker traffic.
 
-### 📊 Infrastructure Comparison
-
-| Feature | v0.31 | v0.33 |
-|---------|-------|-------|
-| **Jails** | 11 | **12** ⭐ |
-| **nftables Sets** | 22 (11+11) | **24 (12+12)** ⭐ |
-| **INPUT Rules** | 22 | **24** |
-| **FORWARD Rules** | 6 | **8** |
-| **Docker Sync Strategy** | ✅ Immediate hook + cron | ✅ Two-tier + immediate hook |
-| **Sync Validate** | Every 1 min | **Every 1 min (improved)** |
-| **Sync Full** | Every 1 min | **Every 15 min (new)** |
-| **PHP Error Detection** | ❌ | **✅ NEW** |
-| **Total Files** | 34 | **42** |
-
----
+The [publication policy](docs/PUBLICATION-SAFETY.md) explains the heuristic gate
+and its limits. It reports locations/types without matched values. A clean HEAD
+is not a historical purge. Keep production logs, credentials, configurations,
+backups and private compatibility reviews outside Git, CI and packages.
 
 ## License
 
-MIT License – see `LICENSE`.
+MIT License — see [LICENSE](releases/v0.34/docs/LICENSE).
 
 ## 👤 Author
 
 **Peter Bakič**  
-vibes coder · self-hosted infra & security  
-Powered by Claude Sonnet 4.5 thinking
+vibes coder · self-hosted infra & security
+
+Current maintenance, documentation and regression work: **Codex (OpenAI)**.
+Earlier versions credited **Claude Sonnet 4.5 Thinking**; that historical
+contribution remains acknowledged.
 
 ## ☕ Support
 
-If this project helps you secure your servers and you want to support further development:
-
-- Buy me a coffee: https://www.buymeacoffee.com/peterdelac
+- [Buy me a coffee](https://www.buymeacoffee.com/peterdelac)
 - Star this repository ⭐
-- Report issues and contribute improvements
+- Report issues and contribute synthetic reproductions — never private exports.
 
 ---
 
-**v0.33 - Production Ready for All PHP Applications & Docker Deployments** 🚀
+**v0.34-dev — tested development baseline, not a final release.**
