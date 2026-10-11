@@ -6,6 +6,28 @@ with systemd, an active `cron` service, both managed nft tables and distribution
 Fail2Ban (tested in CI with the 1.0.2-style client). Existing v0.34-dev can also
 be checked/reapplied. A custom database path is refused, not silently ignored.
 
+## Scan review, 2026-10-11
+
+The sweep excludes exact WordPress core entry points (`index.php`, `wp-login.php`,
+`wp-admin/admin-ajax.php`, `wp-cron.php`) in the root and nested installations.
+Its final-404 requirement and three hits / 30 seconds / 365 days policy are
+unchanged. Existing bans are not automatically withdrawn by this filter change.
+
+Critical detection adds exact credential filenames (including AWS backup
+suffixes) and traversal only in `path`, `file`, `filename` or `download`
+parameters with parent-directory segments targeting `.env` variants or
+`proc/self/environ` / `cmdline`. Percent-encoded dots and separators are covered.
+Exact hellopress and hello-world IOCs count at 301, 404 and 444; critical remains
+one hit / 365 days, independent of HTTP status. Ordinary WordPress core URLs,
+generic JSON/GraphQL and user agents are not new critical evidence. A credential
+filename probe is not proof of disclosure; a Solr 444 or a
+`trust_forwarded_proto` warning does not establish a firewall bypass or attack.
+
+Application note: a reported Easy!Appointments `/config.php` response of HTTP 200
+with zero length does not by itself establish source/credential disclosure.
+Any Apache access restriction for that application must be reviewed and deployed
+separately; this manager upgrade does not install or execute such protection.
+
 ## Stage and verify
 
 Extract into a new unprivileged directory; do not extract over the installed
