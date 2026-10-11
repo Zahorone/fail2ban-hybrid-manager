@@ -459,7 +459,7 @@ Peter Bakič - vibes coder · self-hosted infra & security
 
 ## 📞 Support
 
-- Email: zahor@tuta.io
+- Email: maintainer@example.invalid
 - GitHub Issues: Report bugs or feature requests
 - Documentation: See `docs/` directory
 - Verification Tool: `sudo bash scripts/02-verify-jails-v030.sh`

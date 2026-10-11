@@ -1,0 +1,171 @@
+import importlib.util
+import pathlib
+import sys
+import tempfile
+from unittest.mock import patch
+import subprocess
+import sqlite3
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts/upgrade-v033-v034.py"
+spec = importlib.util.spec_from_file_location("upgrade_v034", SCRIPT)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+
+standard_db = "/var/lib/fail2ban/fail2ban.sqlite3"
+assert module.validate_dbfile("Current database file is:\n`- /var/lib/fail2ban/fail2ban.sqlite3\n") == standard_db
+assert module.validate_dbfile(standard_db + "\n") == standard_db
+assert module.validate_dbfile("None\n") is None
+assert module.validate_dbfile("Current database file is:\n`- None\n") is None
+for output in ("/srv/custom.sqlite3", "Current database file is:\n`- /srv/custom.sqlite3\n"):
+    try:
+        module.validate_dbfile(output)
+    except module.UpgradeError as error:
+        assert "Custom dbfile" in str(error)
+    else:
+        raise AssertionError("Custom database escaped backup protection")
+for output in ("", "NOK: database unavailable", "Current database file is:\n", standard_db + "\nNone"):
+    try:
+        module.validate_dbfile(output)
+    except module.UpgradeError as error:
+        assert "Unrecognized" in str(error)
+    else:
+        raise AssertionError("Ambiguous database response was accepted")
+
+
+status = """Status
+|- Number of jail:\t3
+`- Jail list:\tsshd, recidive, nginx-php-errors
+"""
+assert module.parse_jails(status) == ["sshd", "recidive", "nginx-php-errors"]
+assert module.valid_ip("192.0.2.1")
+assert module.valid_ip("2001:db8::1")
+assert not module.valid_ip("not-an-address")
+
+base = {
+    "nftables": [
+        {"metainfo": {"json_schema_version": 1}},
+        {"table": {"family": "inet", "name": "fail2ban-filter"}},
+        {"rule": {"family": "inet", "table": "fail2ban-filter", "handle": 1}},
+        {"table": {"family": "inet", "name": "filter"}},
+        {"rule": {"family": "inet", "table": "filter", "handle": 8,
+                  "counter": {"packets": 10, "bytes": 500}, "verdict": "accept"}},
+    ]
+}
+counters_changed = {
+    "nftables": [
+        {"metainfo": {"json_schema_version": 2}},
+        {"table": {"family": "inet", "name": "fail2ban-filter"}},
+        {"rule": {"family": "inet", "table": "fail2ban-filter", "handle": 99}},
+        {"table": {"family": "inet", "name": "filter"}},
+        {"rule": {"family": "inet", "table": "filter", "handle": 9,
+                  "counter": {"packets": 11, "bytes": 600}, "verdict": "accept"}},
+    ]
+}
+assert module.external_nft_digest(base) == module.external_nft_digest(counters_changed)
+owned_reordered = {"nftables": [base["nftables"][0], *base["nftables"][3:],
+                               {"table": {"family": "inet", "name": "docker-block"}},
+                               *base["nftables"][1:3]]}
+assert module.external_nft_digest(base) == module.external_nft_digest(owned_reordered)
+foreign_same_name = {"nftables": [*base["nftables"], {"table": {"family": "ip", "name": "docker-block"}}]}
+assert module.external_nft_digest(base) != module.external_nft_digest(foreign_same_name)
+counters_changed["nftables"][-1]["rule"]["verdict"] = "drop"
+assert module.external_nft_digest(base) != module.external_nft_digest(counters_changed)
+
+mapping = module.install_map(ROOT)
+assert pathlib.Path("/etc/fail2ban/jail.local") not in mapping
+assert pathlib.Path("/etc/fail2ban/action.d/nftables-common.local") not in mapping
+assert pathlib.Path("/etc/nftables.conf") not in mapping
+assert pathlib.Path("/usr/local/bin/f2b") in mapping
+assert pathlib.Path("/etc/fail2ban/jail.d/99-webshell-sweep.local") in mapping
+assert pathlib.Path("/etc/fail2ban/filter.d/f2b-webshell-sweep.conf") in mapping
+assert pathlib.Path("/etc/fail2ban/action.d/nftables-multiport.conf") in mapping
+module.validate_multiport(ROOT.parent / "v0.33/actions/nftables-multiport.conf")
+module.validate_multiport(ROOT / "actions/nftables-multiport.conf")
+with tempfile.TemporaryDirectory() as directory:
+    custom = pathlib.Path(directory) / "custom.conf"
+    custom.write_text("[Definition]\nactionban = custom-site-command\n")
+    try:
+        module.validate_multiport(custom)
+    except module.UpgradeError:
+        pass
+    else:
+        raise AssertionError("Unknown local action silently replaced")
+
+with tempfile.TemporaryDirectory() as directory:
+    directory = pathlib.Path(directory)
+    source = directory / "source"
+    target = directory / "target"
+    source.write_text("new version\n")
+    target.write_text("old version\n")
+    module.atomic_install(source, target)
+    assert target.read_text() == "new version\n"
+    assert target.stat().st_mode & 0o777 == 0o644
+
+with tempfile.TemporaryDirectory() as directory:
+    backup = pathlib.Path(directory)
+    payload = backup / "manifest.json"
+    payload.write_text('{"paths": []}\n')
+    import hashlib
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    (backup / "SHA256SUMS").write_text(f"{digest}  manifest.json\n")
+    module.verify_backup(backup)
+    payload.write_text("corrupt\n")
+    try:
+        module.verify_backup(backup)
+    except module.UpgradeError:
+        pass
+    else:
+        raise AssertionError("Corrupt backup passed checksum verification")
+
+# A live WAL-backed database must produce an independently readable snapshot,
+# including committed WAL rows and excluding an uncommitted transaction.
+with tempfile.TemporaryDirectory() as directory:
+    database = pathlib.Path(directory) / "live.sqlite3"
+    destination = pathlib.Path(directory) / "backup.sqlite3"
+    with sqlite3.connect(database) as writer:
+        writer.execute("PRAGMA journal_mode=WAL")
+        writer.execute("CREATE TABLE bans (ip TEXT)")
+        writer.execute("INSERT INTO bans VALUES ('192.0.2.8')")
+        writer.commit()
+        writer.execute("INSERT INTO bans VALUES ('2001:db8::8')")
+        module.backup_sqlite(database, destination)
+        with sqlite3.connect(destination) as reader:
+            assert reader.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            assert reader.execute("SELECT ip FROM bans").fetchall() == [("192.0.2.8",)]
+
+# The standard upgrade must run the canary verifier inside the transaction.
+# Inject a verifier failure after reload and require automatic rollback with
+# the exact backup and original deployment map.
+with patch.object(module, "require_root"), \
+     patch.object(module, "acquire_upgrade_lock"), \
+     patch.object(module, "prepare_persistence"), \
+     patch.object(module, "preflight", return_value=({"sshd": ["192.0.2.8"]}, base)), \
+     patch.object(module, "create_backup", return_value=pathlib.Path("/fixture/backup")), \
+     patch.object(module, "deploy"), \
+     patch.object(module, "run", return_value=subprocess.CompletedProcess([], 0, "0.34-dev\n", "")), \
+     patch.object(module, "restore_missing_bans"), \
+     patch.object(module, "assert_bans_preserved"), \
+     patch.object(module, "nft_ruleset", return_value=base), \
+     patch.object(module, "validate_live_firewall"), \
+     patch.object(module, "validate_effective_dump"), \
+     patch.object(module, "validate_live_filter_contracts"), \
+     patch.object(module, "verify_release_runtime", side_effect=RuntimeError("Docker membership missing")) as verify, \
+     patch.object(module, "rollback") as restore, \
+     patch.object(sys, "argv", [str(SCRIPT), "--apply"]):
+    assert module.main() == 1
+    verify.assert_called_once_with({"sshd": ["192.0.2.8"]}, base)
+    restore.assert_called_once_with(pathlib.Path("/fixture/backup"), mapping)
+    restore.reset_mock()
+    verify.side_effect = None
+    assert module.main() == 0
+    restore.assert_not_called()
+    verify.reset_mock()
+    with patch.object(sys, "argv", [str(SCRIPT)]), patch.object(module, "deploy") as deploy:
+        assert module.main() == 0
+        deploy.assert_not_called()
+        verify.assert_not_called()
+
+print("PASS: standard upgrade scope, firewall integrity and runtime-failure rollback")

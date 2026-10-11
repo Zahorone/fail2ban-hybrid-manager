@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+repo=$(git rev-parse --show-toplevel)
+exec python3 "$repo/scripts/check-publication-safety.py" --staged

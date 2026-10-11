@@ -1023,7 +1023,7 @@ SILENT (for cron):
 EXAMPLES:
   sudo f2b status
   sudo f2b audit
-  sudo f2b find 1.2.3.4
+  sudo f2b find 198.51.100.10
   sudo f2b sync force
   sudo f2b manage block-port 8081
   sudo f2b manage manual-ban 192.0.2.1 30d
@@ -1143,4 +1143,3 @@ mkdir -p "$(dirname "$LOGFILE")"
 touch "$LOGFILE"
 
 main "$@"
-

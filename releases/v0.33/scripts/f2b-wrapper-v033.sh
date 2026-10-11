@@ -3253,7 +3253,7 @@ SILENT (for cron):
 EXAMPLES:
   sudo f2b status
   sudo f2b audit
-  sudo f2b find 1.2.3.4
+  sudo f2b find 198.51.100.10
   sudo f2b sync force
   sudo f2b docker dashboard
   sudo f2b docker sync

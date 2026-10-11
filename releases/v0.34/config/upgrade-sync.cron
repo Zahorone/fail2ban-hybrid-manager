@@ -1,0 +1,4 @@
+# Managed v0.34 upgrade: preserves root's existing crontab.
+SHELL=/bin/sh
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * root /usr/bin/flock -n /run/lock/f2b-upgrade.lock /bin/sh -c '/usr/bin/python3 /usr/local/sbin/f2b-ipv6-sync.py && /usr/bin/python3 /usr/local/sbin/f2b-save-owned-tables.py' 2>&1 | /usr/bin/logger -t f2b-runtime-sync

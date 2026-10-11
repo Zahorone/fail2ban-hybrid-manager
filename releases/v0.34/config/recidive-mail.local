@@ -1,0 +1,4 @@
+# Recidive evidence is in Fail2Ban's own log, including SSH and IPv6 bans.
+[recidive]
+action = nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", port="%(port)s", protocol="%(protocol)s", chain="%(chain)s"]
+         %(mta)s-whois-lines[name=%(__name__)s, sender="%(sender)s", dest="%(destemail)s", chain="%(chain)s", logpath="/var/log/fail2ban.log", grepopts="-a -m <grepmax>"]

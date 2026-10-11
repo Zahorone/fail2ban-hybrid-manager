@@ -1,4 +1,4 @@
-name: IPv6 regression tests
+name: v0.34 release regression tests
 on: [push, pull_request]
 permissions:
   contents: read
@@ -6,11 +6,120 @@ jobs:
   ipv6:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Generic publication policy self-tests
+        run: |
+          /usr/bin/python3 scripts/test-publication-safety.py
+          sh -n scripts/install-publication-hook.sh scripts/publication-pre-commit.sh
+      - name: Publication privacy gate (current tracked tree, values suppressed)
+        run: /usr/bin/python3 scripts/check-publication-safety.py
+      - run: sudo apt-get update && sudo apt-get install -y fail2ban nftables shellcheck
       - name: Shell syntax
-        run: bash -n releases/v0.33/scripts/f2b-wrapper-v033.sh && bash -n releases/v0.33/scripts/f2b-docker-hook.sh && bash -n releases/v0.33/scripts/03-install-wrapper-v033.sh
-      - run: /usr/bin/python3 releases/v0.33/tests/test_wrapper.py
-      - run: /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py
+        run: find releases/v0.34 -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: ShellCheck errors
+        run: find releases/v0.34 -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+      - name: Python syntax
+        env:
+          PYTHONPYCACHEPREFIX: /tmp/f2b-pycache
+        run: /usr/bin/python3 -m compileall -q releases/v0.34/scripts releases/v0.34/tests
+      - name: Static release safety
+        run: /usr/bin/python3 releases/v0.34/tests/test_release_static.py
+      - name: Wrapper regression tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_wrapper.py
+      - name: Reporting scope tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
+      - name: Upgrade transaction unit tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
+      - name: Complete upgrade conflict and rollback tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_upgrade_package.py
+      - name: Canary 227c393 transaction scope tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_canary_upgrade_227c393.py
+      - name: Optional Easy!Appointments Apache hardening tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_easyappointments_hardening.py
+      - name: Critical RCE access and error log fixtures
+        run: /usr/bin/python3 releases/v0.34/tests/test_exploit_critical.py
+      - name: WordPress-safe webshell sweep fixtures
+        run: /usr/bin/python3 releases/v0.34/tests/test_webshell_sweep.py
+      - name: October 11 precise credentials, traversal and nested WordPress regressions
+        run: /usr/bin/python3 releases/v0.34/tests/test_scan_review.py --require-fail2ban
+      - name: Managed filter override coexistence contract
+        run: /usr/bin/python3 releases/v0.34/tests/test_filter_contracts.py
+      - name: Conservative NPM botnet fuzzing recon and medium access filters
+        run: /usr/bin/python3 releases/v0.34/tests/test_access_filters.py --require-fail2ban
+      - name: Full Fail2Ban candidate configuration test
+        run: |
+          candidate="$(mktemp -d)"
+          cp -a /etc/fail2ban/. "$candidate/"
+          cp releases/v0.34/filters/*.conf "$candidate/filter.d/"
+          cp releases/v0.34/actions/*.conf releases/v0.34/actions/*.local "$candidate/action.d/"
+          cp releases/v0.34/config/nginx-recon-optimized.local "$candidate/filter.d/"
+          cp releases/v0.34/config/f2b-anomaly-detection.local "$candidate/filter.d/"
+          cp releases/v0.34/config/jail.local "$candidate/jail.local"
+          cp releases/v0.34/config/php-errors-mail.local "$candidate/jail.d/99-php-errors-mail.local"
+          cp releases/v0.34/config/recidive-mail.local "$candidate/jail.d/99-recidive-mail.local"
+          sudo mkdir -p /opt/rustnpm/data/logs
+          sudo touch \
+            /opt/rustnpm/data/logs/fallback_access.log \
+            /opt/rustnpm/data/logs/fallback_http_access.log \
+            /opt/rustnpm/data/logs/dead-host_access.log \
+            /opt/rustnpm/data/logs/proxy-host-1_access.log \
+            /opt/rustnpm/data/logs/fallback_error.log \
+            /opt/rustnpm/data/logs/proxy-host-1_error.log \
+            /var/log/auth.log \
+            /var/log/fail2ban.log \
+            /var/log/fail2ban-blocked-ips.txt
+          sudo /usr/bin/fail2ban-client -c "$candidate" -t
+          sudo /usr/bin/fail2ban-client -c "$candidate" -d > /tmp/f2b-upgrade-candidate.dump
+          /usr/bin/python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('upgrade', 'releases/v0.34/scripts/upgrade-v033-v034.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          dump = Path('/tmp/f2b-upgrade-candidate.dump').read_text()
+          module.validate_effective_dump(dump)
+          try:
+              module.validate_effective_dump(dump.replace("'maxretry', 3", "'maxretry', 99"))
+          except module.UpgradeError as error:
+              assert 'maxretry' in str(error)
+          else:
+              raise AssertionError('An effective override conflict was accepted')
+          PY
+      - name: PHP filter and binary-log mail tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_php_errors.py
+      - name: Real merged v0.33 upgrade configuration
+        run: |
+          candidate="$(mktemp -d)"
+          cp -a /etc/fail2ban/. "$candidate/"
+          cp releases/v0.33/config/jail.local "$candidate/jail.local"
+          cp releases/v0.33/actions/*.local "$candidate/action.d/"
+          cp releases/v0.34/filters/*.conf "$candidate/filter.d/"
+          cp releases/v0.34/actions/nftables-multiport.conf releases/v0.34/actions/nftables-recidive.conf "$candidate/action.d/"
+          cp releases/v0.34/actions/docker-sync-hook.conf "$candidate/action.d/"
+          cp releases/v0.34/config/exploit-critical-rce.local "$candidate/jail.d/99-exploit-critical-rce.local"
+          cp releases/v0.34/config/webshell-sweep.local "$candidate/jail.d/99-webshell-sweep.local"
+          cp releases/v0.34/config/php-errors-mail.local "$candidate/jail.d/99-php-errors-mail.local"
+          cp releases/v0.34/config/recidive-mail.local "$candidate/jail.d/99-recidive-mail.local"
+          sudo /usr/bin/fail2ban-client -c "$candidate" -t
+      - name: IPv6 parser tests
+        run: /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py
       - name: Real nftables in disposable network namespace
-        run: sudo unshare --net /usr/bin/python3 releases/v0.33/tests/test_ipv6_sync.py --net
+        run: sudo unshare --net /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py --net
+      - name: Real Fail2Ban actions in disposable mount and network namespaces
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_live_actions.py
+      - name: Build and verify complete upgrade archive
+        run: /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-complete-upgrade.tar.gz
+      - name: Publication privacy gate (complete archive and manifest)
+        run: /usr/bin/python3 scripts/check-publication-safety.py --archive /tmp/f2b-complete-upgrade.tar.gz
+      - name: Full legacy upgrade in disposable namespaces (simulated systemd and cron)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py
+      - name: v0.33 scan-review local repairs coexistence and rollback
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review
+      - name: v0.34-dev scan-review local repairs coexistence and rollback
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --scan-review --v034dev
+      - name: Synthetic private per-deployment review and rollback
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --local-review-fixture
+      - name: Pristine v0.33 known-invalid baseline refusal and merged configuration
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --pristine

@@ -1,0 +1,10 @@
+# Reporting-only exclusions. These rules do not alter Fail2Ban filters or bans.
+# Copy to /etc/f2b/reporting.ini and replace every example value.
+# A line is excluded only when source, method, host, status and exact path match.
+
+[trusted-probe "rustdesk-example"]
+source = 192.0.2.10/32
+method = GET
+host = rustdesk.example.invalid
+status = 404
+paths = /api/heartbeat, /api/sysinfo, /api/audit/conn

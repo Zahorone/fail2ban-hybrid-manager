@@ -1,0 +1,6 @@
+# Nginx error logs may contain NUL or other binary bytes. Force grep to read
+# them as text so notifications contain the matching evidence lines.
+[nginx-php-errors]
+action = %(banaction)s[port="%(port)s", protocol="%(protocol)s"]
+         docker-sync-hook
+         sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", protocol="%(protocol)s", chain="%(chain)s", logpath="%(logpath)s", grepopts="-a -m <grepmax>"]

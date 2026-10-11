@@ -1,0 +1,17 @@
+[10/Oct/2026:11:00:01 +0200] - 200 200 - GET https wordpress.example.test "/index.php" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:02 +0200] - 204 204 - HEAD https wordpress.example.test "/wp-login.php" [Client 192.0.2.1] [Length 0]
+[10/Oct/2026:11:00:03 +0200] - 301 - - GET http wordpress.example.test "/missing.php" [Client 192.0.2.1] [Length 0]
+[10/Oct/2026:11:00:04 +0200] - 302 302 - GET https wordpress.example.test "/wp-admin/admin-ajax.php?action=heartbeat" [Client 192.0.2.1] [Length 0]
+[10/Oct/2026:11:00:05 +0200] - 200 200 - GET https wordpress.example.test "/wp-cron.php?doing_wp_cron=1" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:06 +0200] - 200 200 - GET https wordpress.example.test "/wp-json/wp/v2/posts" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:07 +0200] - 200 200 - POST https wordpress.example.test "/wp-content/plugins/wp-file-manager/file_folder_manager.php" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:08 +0200] - 200 200 - GET https app.example.test "/index.php/login" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:09 +0200] - 200 200 - GET https app.example.test "/booking/reschedule/abc" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:10 +0200] - 200 200 - GET https app.example.test "/assets/app.php" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:11 +0200] - 404 404 - POST https app.example.test "/posted.php" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:12 +0200] - 404 404 - GET https app.example.test "/news" [Client 192.0.2.1] [Length 10] "GET /quoted.php HTTP/1.1" "https://evil.example/ref.php"
+2026/10/10 11:00:13 [warn] 1#1: *1 client: 192.0.2.1, server: _, request: "GET /missing.php HTTP/1.1", referrer: "-"
+[10/Oct/2026:11:00:14 +0200] - 404 404 - GET https wordpress.example.test "/index.php" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:15 +0200] - 404 404 - GET https wordpress.example.test "/wp-login.php?redirect_to=/admin" [Client 192.0.2.1] [Length 10]
+[10/Oct/2026:11:00:16 +0200] - 404 404 - HEAD https wordpress.example.test "/wp-admin/admin-ajax.php?action=x" [Client 192.0.2.1] [Length 0]
+[10/Oct/2026:11:00:17 +0200] - 404 404 - GET https wordpress.example.test "/wp-cron.php" [Client 192.0.2.1] [Length 10]
