@@ -3,6 +3,38 @@
 This is the interface/design boundary for a later modular installer, not an
 implementation of a new installer UI or an automatic discovery/apply engine.
 
+## Version boundary agreed 2026-10-11
+
+v0.34 is the intended shared "point 0" baseline for objednavky and terminy.
+Finish its current fixes and compatible, backed-up upgrade first. At the time
+of this plan, objednavky is a v0.34-dev canary and terminy remains v0.33 with
+local repairs; neither a common deployed baseline nor a final release is being
+claimed. Preparing this plan does not authorize a remote production deployment.
+Evaluate the actual terminy preflight and rollback readiness before a separately
+approved maintenance-window apply. Between v0.34 and v0.40, refine the existing
+base rather than incorporating a large installer redesign into v0.34.
+
+The unified tool belongs to v0.40, with exactly three entry choices:
+
+1. Install.
+2. Update.
+3. Manage modules (add/remove).
+
+Module selection, including optional hardening, is manual. Only simple
+prerequisite/compatibility checks of selected modules are required; automatic
+discovery of every application is not a requirement. A persistent inventory
+records installed core/module versions, settings and managed files. Update
+changes only installed components, not every available module. Backup, tests
+and rollback are shared infrastructure across all three operations.
+
+v0.40 development is LOCAL ONLY until it is final AND publication is explicitly
+authorized. When that work starts, use a separate local working copy, preserve
+local work safely, disable automatic pushing and do not mix its implementation
+into this pushed v0.34 branch. No remote v0.40 branch, PR, tag, release, CI upload
+or remotely published archive containing its development code is permitted.
+This document publishes only the v0.34 boundary/roadmap, not v0.40 code. There is
+no need to create or implement the v0.40 working copy now.
+
 ## Independent selection axes
 
 | Axis | Responsibilities | Current scope |
@@ -13,8 +45,8 @@ implementation of a new installer UI or an automatic discovery/apply engine.
 | Deployment | Docker ports, networks and ban enforcement | Existing manager Docker hooks; not an application selector |
 
 An application can run behind NPM with an Apache backend in Docker. These are
-combinable axes, not mutually exclusive installer choices. Detection may propose
-compatible modules, but must not authorize or enable application changes.
+combinable axes, not mutually exclusive installer choices. Manual selection and
+checks of selected modules must never silently enable application changes.
 
 ## Managed filter interface and override coexistence
 
@@ -46,7 +78,7 @@ WordPress exceptions. Without an actual server file export, these fixtures are
 not a claim of byte-exact reproduction of either server's custom overrides.
 The real server's read-only preflight is the authority for compatibility.
 
-## Optional module contract (future installer interface)
+## Optional module contract (v0.40 installer interface, not implemented here)
 
 Each selectable module must declare:
 

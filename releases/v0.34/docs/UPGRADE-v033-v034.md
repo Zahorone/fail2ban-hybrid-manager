@@ -7,6 +7,11 @@ Fail2Ban (tested in CI with the 1.0.2-style client). Existing v0.34-dev can also
 be checked/reapplied. A custom database path is refused, not silently ignored.
 
 Architecture and module boundaries: see `MODULE-ARCHITECTURE.md` in this package.
+v0.34 is the planned common baseline for both servers, not evidence that both
+have already been upgraded. The unified install/update/module-management tool
+is reserved for local-only v0.40 development, not this upgrade's scope. A roadmap
+does not authorize a production apply; the maintenance-window approval remains
+separate from preparation and read-only preflight.
 The manifest's `filter_override_policy` specifies preserve-and-validate-effective
 coexistence for scan-review `.local` repairs. Their marker/SHA-256 is reported,
 but neither the marker nor a guessed historical hash authorizes replacement.
