@@ -44,13 +44,15 @@ def build(output):
             relative = str(path.relative_to(repo))
             for revision in git('log', '--format=%H', '--', relative).splitlines():
                 content = subprocess.run(['git', '-C', str(repo), 'show', revision + ':' + relative], capture_output=True)
+                # Compatibility digests come only from canonical component
+                # history, never deployment review exports. Old source text is
+                # not copied into the package; policing its examples here would
+                # incorrectly reject an otherwise recognized legacy install.
                 if content.returncode == 0:
-                    text = policy.decode(content.stdout)
-                    if text is not None and not policy.findings(text, relative):
-                        digests.add(hashlib.sha256(content.stdout).hexdigest())
+                    digests.add(hashlib.sha256(content.stdout).hexdigest())
         known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
-                'known_target_policy': 'source-history-publication-safe-v1',
+                'known_target_policy': 'canonical-source-history-v1',
                 'filter_override_policy': module.FILTER_OVERRIDE_POLICY,
                 'upgrade_from': ['0.33', '0.33-ipv6.1', '0.34-dev'], 'known_targets': known,
                 'files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)},

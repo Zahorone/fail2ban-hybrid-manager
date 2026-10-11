@@ -18,7 +18,9 @@ python3 scripts/check-publication-safety.py --staged
 without replacing an existing user hook. CI checks the full tracked tree and
 the built archive, including its manifest. The package builder checks the tree
 and payload before writing an archive; known historical target hashes are
-derived only from publication-safe source-controlled installer components.
+derived only from canonical source-controlled installer components. Historical
+source text is not included: these compatibility digests must still recognize
+legacy components whose old examples did not follow the current policy.
 No deployment hash list is shipped. Local-only v0.40 code paths are refused.
 
 The generic rules flag public non-documentation IP literals, non-example
