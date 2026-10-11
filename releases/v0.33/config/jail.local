@@ -12,7 +12,7 @@ sender = fail2ban@example.com
 sendername = Fail2Ban Notifications
 
 # Whitelist
-ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24 172.17.0.0/16 172.18.0.0/16 188.121.168.64
+ignoreip = 127.0.0.1/8 ::1
 
 # Global defaults
 findtime = 600

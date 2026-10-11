@@ -19,6 +19,10 @@ def build(output):
         return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
     if git('status', '--porcelain', '--untracked-files=no'):
         raise RuntimeError('Build only from a clean committed tracked checkout')
+    policy_spec = importlib.util.spec_from_file_location('publication_policy', repo / 'scripts/check-publication-safety.py')
+    policy = importlib.util.module_from_spec(policy_spec)
+    policy_spec.loader.exec_module(policy)
+    subprocess.run(['python3', str(repo / 'scripts/check-publication-safety.py')], check=True)
     commit = git('rev-parse', 'HEAD')
     spec = importlib.util.spec_from_file_location('upgrade', root / 'scripts/upgrade-v033-v034.py')
     module = importlib.util.module_from_spec(spec)
@@ -40,9 +44,13 @@ def build(output):
             relative = str(path.relative_to(repo))
             for revision in git('log', '--format=%H', '--', relative).splitlines():
                 content = subprocess.run(['git', '-C', str(repo), 'show', revision + ':' + relative], capture_output=True)
-                if content.returncode == 0: digests.add(hashlib.sha256(content.stdout).hexdigest())
+                if content.returncode == 0:
+                    text = policy.decode(content.stdout)
+                    if text is not None and not policy.findings(text, relative):
+                        digests.add(hashlib.sha256(content.stdout).hexdigest())
         known[str(target)] = sorted(digests)
     manifest = {'schema': 1, 'release': module.RELEASE, 'source_commit': commit,
+                'known_target_policy': 'source-history-publication-safe-v1',
                 'filter_override_policy': module.FILTER_OVERRIDE_POLICY,
                 'upgrade_from': ['0.33', '0.33-ipv6.1', '0.34-dev'], 'known_targets': known,
                 'files': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)},
@@ -67,6 +75,12 @@ def build(output):
             if path.is_file() and (path.suffix in {'.sqlite3', '.db', '.pem', '.key', '.log'} or
                                   b'BEGIN PRIVATE KEY' in path.read_bytes()):
                 raise RuntimeError('Sensitive artifact: ' + str(path))
+            if path.is_file():
+                text = policy.decode(path.read_bytes())
+                hits = policy.findings(text, str(path.relative_to(package))) if text is not None else []
+                if hits:
+                    for label, line, kind in hits: print(f'{label}:{line}: {kind}')
+                    raise RuntimeError('Publication gate rejected package; values suppressed')
         with output.open('xb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0, filename='') as compressed:
             with tarfile.open(fileobj=compressed, mode='w') as archive:
                 for path in sorted(package.rglob('*')):

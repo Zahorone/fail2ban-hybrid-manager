@@ -5,12 +5,11 @@ implementation of a new installer UI or an automatic discovery/apply engine.
 
 ## Version boundary agreed 2026-10-11
 
-v0.34 is the intended shared "point 0" baseline for objednavky and terminy.
-Finish its current fixes and compatible, backed-up upgrade first. At the time
-of this plan, objednavky is a v0.34-dev canary and terminy remains v0.33 with
-local repairs; neither a common deployed baseline nor a final release is being
-claimed. Preparing this plan does not authorize a remote production deployment.
-Evaluate the actual terminy preflight and rollback readiness before a separately
+v0.34 is the intended shared "point 0" baseline for supported installations.
+Finish its current fixes and compatible, backed-up upgrade first. The public
+plan does not record private deployment state or claim a final release.
+Preparing this plan does not authorize a remote production deployment.
+Evaluate each installation's preflight and rollback readiness before a separately
 approved maintenance-window apply. Between v0.34 and v0.40, refine the existing
 base rather than incorporating a large installer redesign into v0.34.
 

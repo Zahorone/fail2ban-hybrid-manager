@@ -283,7 +283,7 @@ echo ""
 
 echo "IP management (manual):"
 echo " # Add banned IP (with 1h timeout):"
-echo " sudo nft add element inet docker-block docker-banned-ipv4 { 194.154.241.170 timeout 1h }"
+echo " sudo nft add element inet docker-block docker-banned-ipv4 { 198.51.100.11 timeout 1h }"
 
 echo ""
 
@@ -293,7 +293,7 @@ echo " sudo nft list set inet docker-block docker-banned-ipv4"
 echo ""
 
 echo " # Remove IP:"
-echo " sudo nft delete element inet docker-block docker-banned-ipv4 { 194.154.241.170 }"
+echo " sudo nft delete element inet docker-block docker-banned-ipv4 { 198.51.100.11 }"
 
 echo ""
 
@@ -301,4 +301,3 @@ echo "Test reload:"
 echo " sudo nft -f /etc/nftables.conf"
 
 echo ""
-

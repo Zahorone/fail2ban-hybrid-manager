@@ -1,4 +1,6 @@
 import pathlib
+import configparser
+import ipaddress
 import re
 
 
@@ -23,7 +25,11 @@ assert "[Init?family=inet6]" in common
 assert "addr_set = f2b-<name>-v6" in common
 
 jail = (ROOT / "config/jail.local").read_text()
-assert "188.121.168.64" not in jail
+for version in ("v0.31", "v0.33", "v0.34"):
+    defaults = configparser.ConfigParser(interpolation=None)
+    defaults.read(ROOT.parent / version / "config/jail.local")
+    whitelist = defaults.defaults()["ignoreip"].split()
+    assert whitelist and all(ipaddress.ip_network(value, strict=False).is_loopback for value in whitelist)
 
 installer = (ROOT / "scripts/02-install-jails-v034.sh").read_text()
 assert "99-php-errors-mail.local" in installer

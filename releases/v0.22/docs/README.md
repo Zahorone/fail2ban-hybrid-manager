@@ -365,7 +365,7 @@ sudo cp config/jail.local /etc/fail2ban/
 sudo bash scripts/02-verify-jails-v020.sh
 
 # Server 2
-sed -i 's|destemail = root@localhost|destemail = admin@company.com|' config/jail.local
+sed -i 's|destemail = root@localhost|destemail = maintainer@example.invalid|' config/jail.local
 sudo cp config/jail.local /etc/fail2ban/
 sudo bash scripts/02-verify-jails-v020.sh
 ```
@@ -429,7 +429,7 @@ Powered by Claude Sonnet 4.5 thinking
 
 ## 📞 Support
 
-- Email: zahor@tuta.io
+- Email: maintainer@example.invalid
 - GitHub Issues: Report bugs or feature requests
 - Documentation: See `docs/` directory
 - Verification Tool: `sudo bash scripts/02-verify-jails-v021.sh`

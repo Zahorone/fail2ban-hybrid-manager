@@ -78,7 +78,7 @@ for line in [attacks[0], attacks[1], attacks[2], attacks[-3], attacks[-2], attac
     events[ip] = recent
     if len(recent) == 3:
         ban_at[ip] = when
-assert set(ban_at) == {"20.205.114.149", "2001:db8::149"}
+assert set(ban_at) == {"198.51.100.16", "2001:db8::149"}
 
 if shutil.which("fail2ban-regex"):
     for fixture, expected in ((ATTACKS, 26), (BENIGN, 0)):
