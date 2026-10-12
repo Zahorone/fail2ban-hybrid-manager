@@ -142,3 +142,19 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-unit-') as temporary:
             assert marker.read_text() == 'incomplete\n', 'Rerun must not clean/rebuild partial state'
 
 print('PASS: stock/unknown config, ARM64 platform, explicit dependency installation, optional profiles, real-log selection, foreign preservation and rerun refusal')
+
+# No socket, then ping with an incomplete profile, then the complete profile.
+responses = [subprocess.CompletedProcess([], 255, '', ''),
+             subprocess.CompletedProcess([], 0, 'Server replied: pong\n', ''),
+             subprocess.CompletedProcess([], 0, 'Jail list: manualblock\n', ''),
+             subprocess.CompletedProcess([], 0, 'Server replied: pong\n', ''),
+             subprocess.CompletedProcess([], 0, 'Jail list: manualblock, recidive\n', '')]
+with patch.object(m, 'run', side_effect=responses) as calls, patch.object(m.time, 'sleep'):
+    m.wait_ready(['manualblock', 'recidive'])
+    assert calls.call_count == 5
+    assert all(0 < c.kwargs['timeout'] <= 3 for c in calls.call_args_list)
+with patch.object(m, 'run', return_value=subprocess.CompletedProcess([], 255, '', '')):
+    refused(m.wait_ready, ['manualblock'], 0.01)
+with patch.object(m, 'run', side_effect=subprocess.TimeoutExpired('client', 0.01)):
+    refused(m.wait_ready, ['manualblock'], 0.01)
+print('PASS: bounded readiness tolerates delayed socket and waits for exact selected profile')

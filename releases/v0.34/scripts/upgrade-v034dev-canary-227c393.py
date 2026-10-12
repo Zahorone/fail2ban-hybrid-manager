@@ -2,7 +2,7 @@
 """Transactional v0.34-dev canary update to changeset 227c393."""
 from __future__ import annotations
 
-import argparse, ast, datetime as dt, hashlib, ipaddress, json, os, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile
+import argparse, ast, datetime as dt, hashlib, importlib.util, ipaddress, json, os, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile
 from pathlib import Path
 
 RELEASE = "0.34-dev"
@@ -81,7 +81,48 @@ def valid_ip(value):
 def snapshot_bans():
     jails = parse_jails(run("fail2ban-client", "status").stdout)
     if not jails: raise UpgradeError("Fail2Ban returned no jails")
-    return {j: sorted({x for x in run("fail2ban-client","get",j,"banip").stdout.split() if valid_ip(x)}) for j in jails}
+    result = {}
+    for jail in jails:
+        addresses = run("fail2ban-client", "get", jail, "banip").stdout.split()
+        if not all(valid_ip(x) for x in addresses):
+            raise UpgradeError("Malformed ban response: " + jail)
+        result[jail] = sorted({str(ipaddress.ip_address(x)) for x in addresses})
+    return result
+
+def diagnose_sync(docker=False):
+    """Strict active-profile checks; failed API reads never become zero bans."""
+    sync_path = Path('/usr/local/sbin/f2b-ipv6-sync.py')
+    if not sync_path.is_file(): sync_path = package_root() / 'scripts/f2b-ipv6-sync.py'
+    spec = importlib.util.spec_from_file_location('diagnostic_sync', sync_path)
+    sync = importlib.util.module_from_spec(spec); spec.loader.exec_module(sync)
+    bans = snapshot_bans()
+    # Read the whole ruleset once: an absent lazy set differs from a failed read.
+    document = nft_json()
+    if not any(e.get('table', {}).get('family') == 'inet' and
+               e['table'].get('name') == 'fail2ban-filter' for e in document['nftables']):
+        raise UpgradeError('Managed firewall table missing')
+    present = {(e['set']['table'], e['set']['name']) for e in document['nftables']
+               if 'set' in e and e['set'].get('family') == 'inet'}
+    for jail, addresses in bans.items():
+        if jail == 'recidive':
+            names = {4: 'f2b-recidive', 6: 'f2b-recidive-v6'}
+        else:
+            names = {v: value[0] for v, value in effective_nft_actions(jail).items()}
+        if set(names) != {4, 6}: raise UpgradeError('No two-family action: ' + jail)
+        for family, name in names.items():
+            expected = {x for x in addresses if ipaddress.ip_address(x).version == family}
+            if jail == 'recidive' and ('fail2ban-filter', name) not in present:
+                raise UpgradeError('Managed recidive set missing')
+            actual = (set(sync.readset('fail2ban-filter', name))
+                      if ('fail2ban-filter', name) in present else set())
+            if actual != expected: raise UpgradeError('Jail/set membership mismatch: ' + jail)
+    if docker:
+        for family in (4, 6):
+            expected = {x for values in bans.values() for x in values
+                        if ipaddress.ip_address(x).version == family}
+            if set(sync.readset('docker-block', 'docker-banned-ipv' + str(family))) != expected:
+                raise UpgradeError('Docker membership mismatch')
+    print('PASS: ' + str(len(bans)) + ' active jails synchronized (IPv4 + IPv6)')
 
 def restore_bans(saved):
     live = set(parse_jails(run("fail2ban-client","status").stdout))
@@ -315,11 +356,16 @@ def main():
     mode.add_argument("--apply",action="store_true"); mode.add_argument("--rollback",type=Path)
     mode.add_argument("--verify-only",action="store_true",help="read-only runtime and Docker membership checks")
     mode.add_argument("--set-name",nargs=2,metavar=("JAIL","FAMILY"),help="resolve the effective nft set for wrapper diagnostics")
+    mode.add_argument("--sync-check", action="store_true", help="strict read-only active-profile sync check")
+    mode.add_argument("--docker-check", action="store_true", help="strict read-only active-profile and Docker union check")
     parser.add_argument("--backup-dir",type=Path,default=Path("/var/backups/f2b-v034-canary"))
     parser.add_argument("--fixture-root",type=Path,help=argparse.SUPPRESS); args=parser.parse_args()
     root=package_root(); fixture=args.fixture_root is not None; system_root=args.fixture_root.resolve() if fixture else Path("/")
     mapping=install_map(root,system_root)
     try:
+        if args.sync_check or args.docker_check:
+            diagnose_sync(docker=args.docker_check)
+            return 0
         if args.set_name:
             jail,family=args.set_name
             if family not in {"4","6"}: raise UpgradeError("Family must be 4 or 6")

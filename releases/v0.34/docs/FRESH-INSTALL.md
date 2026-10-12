@@ -5,6 +5,48 @@ reboot or external traffic enforcement. The original `v0.34-dev` tag's installer
 rejects distro stock flush configuration; its upgrade asset is not a clean-install
 bundle. Use current reviewed source for this fix. The old tag/assets are unchanged.
 
+## Known partial-install recovery (core profile only)
+
+The first VM trial of source `06d730b` found a startup race: systemd returned
+before the Fail2Ban socket was ready. Subsequent source waits for `ping` **and**
+the exact selected active jail list, with a 60-second deadline. The VM trial did
+not validate a completed fresh install or reboot. Do not rerun the fresh installer
+over an `incomplete` marker, and do not delete configuration/database to bypass it.
+
+For that specific partial **core-only** transaction, use the separate root-only
+`scripts/recover-fresh.py` from the reviewed fix. Keep the repository Git history
+available (`git fetch origin`); recovery derives generic target fingerprints from
+the immutable original commit. Supply your actual private backup directory locally:
+
+```sh
+read -r -p 'Exact /var/backups/f2b-fresh-* directory: ' F2B_RECOVERY_BACKUP
+sudo /usr/bin/python3 scripts/recover-fresh.py --backup "$F2B_RECOVERY_BACKUP"
+# Only after PASS, using the identical reviewed checkout and backup:
+sudo /usr/bin/python3 scripts/recover-fresh.py --backup "$F2B_RECOVERY_BACKUP" --apply
+sudo fail2ban-client ping
+sudo fail2ban-client status
+sudo f2b sync check
+sudo f2b docker verify
+sudo cat /etc/f2b/fresh-install.state
+```
+
+The original backup has **no transaction manifest**. Recovery does not pretend
+otherwise: it requires verified stock archived configuration, exact legacy target
+bytes, the known incomplete marker, the core profile, enabled services, isolated
+persistence syntax validation, and an unchanged foreign-firewall digest. Unknown
+files, modified targets, unsafe permissions, mismatched backup, or another profile
+are refused. Apply creates a private recovery manifest and copies of replaced
+diagnostic helpers; it does not replace jail configuration, stop the daemon,
+restore the database, or load/flush the global firewall. A failed completion keeps
+the incomplete marker. No automatic rollback of unknown state is attempted.
+
+`nftables` being **inactive/dead but enabled/success** is expected immediately
+after the scoped install: owned tables were loaded individually, not by starting
+the systemd unit. The unit is enabled for boot; the drop-in disables the stock
+stop flush and rejects reload. Do not `start`/`restart` it over live tables just
+to make status green. Enabled state plus an isolated syntax check is not proof
+of successful boot persistence; test reboot separately on the disposable VM.
+
 ## Copy/paste: disposable Ubuntu 26.04 ARM64 VM, core profile
 
 Run in a fresh booted VM with console access, not on an existing managed host:
