@@ -247,7 +247,7 @@ else
 fi
 
 # Reconcile elements without first destroying the live table.
-if command -v f2b >/dev/null 2>&1; then
+if command -v f2b >/dev/null 2>&1 && systemctl is-active --quiet fail2ban; then
   info "Repopulating docker-block sets from Fail2Ban..."
   f2b docker sync full || warning "f2b docker sync full failed (manual sync may be needed)"
 else
@@ -293,8 +293,10 @@ fi
 if nft list set inet docker-block docker-banned-ipv4 &>/dev/null; then
   log "Set docker-banned-ipv4 exists (ready for sync)"
 
-  BANNED=$(nft list set inet docker-block docker-banned-ipv4 2>/dev/null | \
-    grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
+  # A successful empty set is not an error under set -e/pipefail. Keep actual
+  # nft read failures fatal rather than suppressing the whole pipeline.
+  BANNED_SNAPSHOT=$(nft list set inet docker-block docker-banned-ipv4)
+  BANNED=$(awk '{ for (i=1; i<=NF; i++) if ($i ~ /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/) n++ } END { print n+0 }' <<< "$BANNED_SNAPSHOT")
 
   if [ "$BANNED" -eq 0 ]; then
     info "Currently 0 banned IPs"

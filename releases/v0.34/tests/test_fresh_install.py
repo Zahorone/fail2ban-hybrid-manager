@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -27,6 +28,14 @@ assert not m.stock_nft(STOCK + '# changed\n', digest)
 assert not m.stock_nft(STOCK, None)
 custom = STOCK.replace('priority filter;', 'priority filter; policy drop;')
 assert not m.stock_nft(custom, hashlib.md5(custom.encode()).hexdigest())
+
+docker_source = (m.SOURCE / 'scripts/04-install-docker-block-v034.sh').read_text()
+counting = re.search(r'  BANNED_SNAPSHOT=.*?\n  BANNED=.*?\n', docker_source, re.S)[0]
+for payload, expected in (('table inet docker-block { set docker-banned-ipv4 { } }', '0'),
+                          ('elements = { 192.0.2.7, 198.51.100.9 }', '2')):
+    script = 'set -e; set -o pipefail\nnft() { printf "%s\\n" "' + payload + '"; }\n' + counting + 'test "$BANNED" = ' + expected
+    subprocess.run(['bash', '-c', script], check=True)
+assert subprocess.run(['bash', '-c', 'set -e; set -o pipefail\nnft() { return 42; }\n' + counting]).returncode == 42
 custom = STOCK.replace('chain input {', 'chain input { tcp dport 22 accept;')
 assert not m.stock_nft(custom, hashlib.md5(custom.encode()).hexdigest())
 
