@@ -26,6 +26,8 @@ jobs:
         run: /usr/bin/python3 -m compileall -q releases/v0.34/scripts releases/v0.34/tests
       - name: Static release safety
         run: /usr/bin/python3 releases/v0.34/tests/test_release_static.py
+      - name: Fresh-install prerequisites and stock-bootstrap contracts
+        run: /usr/bin/python3 releases/v0.34/tests/test_fresh_install.py
       - name: Wrapper regression tests
         run: /usr/bin/python3 releases/v0.34/tests/test_wrapper.py
       - name: Reporting scope tests
@@ -109,6 +111,8 @@ jobs:
         run: sudo unshare --net /usr/bin/python3 releases/v0.34/tests/test_ipv6_sync.py --net
       - name: Real Fail2Ban actions in disposable mount and network namespaces
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_live_actions.py
+      - name: Fresh core install with real Fail2Ban and foreign firewall preservation (systemd simulated)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_fresh_linux.py
       - name: Build and verify complete upgrade archive
         run: /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-complete-upgrade.tar.gz
       - name: Publication privacy gate (complete archive and manifest)
