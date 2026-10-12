@@ -382,7 +382,7 @@ log_info "Vytváram /etc/nftables.d/fail2ban-filter.nft..."
 sudo mkdir -p /etc/nftables.d
 
 NFT_SNAPSHOT=$(sudo mktemp /etc/nftables.d/.fail2ban-filter.XXXXXXXX)
-sudo nft list table inet fail2ban-filter | sudo tee "$NFT_SNAPSHOT" &>/dev/null
+sudo nft list table inet fail2ban-filter > "$NFT_SNAPSHOT"
 sudo chmod 0600 "$NFT_SNAPSHOT"
 sudo mv "$NFT_SNAPSHOT" /etc/nftables.d/fail2ban-filter.nft
 

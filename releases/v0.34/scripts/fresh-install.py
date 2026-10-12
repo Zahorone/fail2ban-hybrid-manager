@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,11 @@ def dependencies(args):
 
 
 def file_guards():
+    for name in ('/etc/fail2ban', '/etc/fail2ban/jail.d', '/etc/fail2ban/filter.d',
+                 '/etc/fail2ban/action.d', '/etc/f2b', '/usr/local/bin', '/usr/local/sbin',
+                 '/usr/local/libexec'):
+        if path(name).is_symlink():
+            raise FreshError('Custom symlinked installation path requires review: ' + name)
     for name in ('/usr/local/bin/f2b', '/etc/fail2ban/jail.local', '/etc/f2b/fresh-install.state'):
         if path(name).exists() or path(name).is_symlink():
             raise FreshError('Existing installation detected at ' + name + '; use upgrade/recovery, not fresh install')
@@ -111,6 +117,16 @@ def file_guards():
         raise FreshError('Custom nftables service requires review')
     if list(path('/etc/fail2ban').rglob('*.local')):
         raise FreshError('Existing Fail2Ban local overrides require review')
+    database = path('/var/lib/fail2ban/fail2ban.sqlite3')
+    if database.is_symlink():
+        raise FreshError('Custom Fail2Ban database symlink requires review')
+    if database.exists():
+        try:
+            with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as connection:
+                if connection.execute('SELECT count(*) FROM bans').fetchone()[0]:
+                    raise FreshError('Existing Fail2Ban ban history requires reviewed upgrade/recovery')
+        except sqlite3.Error as error:
+            raise FreshError('Existing Fail2Ban database cannot be safely classified') from error
 
 
 def conffiles(package):

@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 import subprocess
+import sqlite3
 import tempfile
 from unittest.mock import patch
 
@@ -118,6 +119,16 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-unit-') as temporary:
             foreign['nftables'].append({'table': {'family': 'inet', 'name': 'fail2ban-filter'}})
             refused(m.nft_preflight)
             foreign['nftables'].pop()
+            database = m.path('/var/lib/fail2ban/fail2ban.sqlite3')
+            database.parent.mkdir(parents=True)
+            with sqlite3.connect(database) as connection:
+                connection.execute('CREATE TABLE bans (ip TEXT)')
+            m.file_guards()
+            with sqlite3.connect(database) as connection:
+                connection.execute('INSERT INTO bans VALUES (?)', ('192.0.2.7',))
+            refused(m.file_guards)
+            with sqlite3.connect(database) as connection:
+                connection.execute('DELETE FROM bans')
             marker = m.path('/etc/f2b/fresh-install.state'); marker.parent.mkdir(parents=True); marker.write_text('incomplete\n')
             refused(m.file_guards)
             assert marker.read_text() == 'incomplete\n', 'Rerun must not clean/rebuild partial state'

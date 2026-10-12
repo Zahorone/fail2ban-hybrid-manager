@@ -13,7 +13,7 @@ if [[ $EUID -ne 0 ]]; then
   echo "Run with sudo" >&2
   exit 1
 fi
-if ! command -v python3 >/dev/null 2>&1; then
+if [[ ! -x /usr/bin/python3 ]]; then
   echo "Missing bootstrap dependency: python3. Install explicitly: sudo apt-get install python3" >&2
   exit 1
 fi
