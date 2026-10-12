@@ -34,18 +34,27 @@ are public product components. Deployment exports and private reviews are not.
 
 ## 📦 Clean installation
 
-On a **fresh disposable Debian/Ubuntu test host**, prepare dependencies/services,
-review site-specific log, mail and Docker settings, then from a trusted checkout:
+On a **fresh disposable Debian/Ubuntu systemd host** (amd64/arm64), run read-only
+checks first. Ubuntu 26.04 ARM64 detection is not VM/reboot certification.
+From a trusted current source checkout:
 
 ```sh
 cd releases/v0.34
-sudo bash INSTALL-ALL-v034.sh
+sudo bash INSTALL-ALL-v034.sh --check
+sudo bash INSTALL-ALL-v034.sh --install-prerequisites
+sudo bash INSTALL-ALL-v034.sh --check
+sudo bash INSTALL-ALL-v034.sh --apply --bootstrap-stock-nft
 ```
 
-This is a mutating installer, not a dry run. It refuses an existing managed
-installation and unsafe global flush configuration. Cleanup flags are not a safe
-preflight. Shipped `ignoreip` defaults contain loopback only; configure additional
-local trust explicitly and keep it out of source control.
+Default/`--check` is read-only. Package installation and manager apply require
+their explicit flags. Apply backs up verified stock nftables configuration and
+writes owned persistence without executing a global flush. Unknown configuration,
+existing managed state and incomplete reruns are refused; no cleanup is performed.
+Only core `recidive`/`manualblock` jails are enabled by default. Select SSH, Docker,
+NPM real-log and mail options explicitly and repeat them during setup/check/apply.
+Missing traffic logs are never fabricated and disabled jails are listed honestly.
+Shipped `ignoreip` defaults contain loopback only. See the full
+[fresh-install dependency/profile/recovery contract](FRESH-INSTALL.md).
 
 ## 🔄 Upgrade and rollback
 

@@ -65,29 +65,52 @@ releases/
 
 ## Usage
 
-Review and pin a trusted source commit before testing. Replace `REVIEWED_COMMIT`
-with that commit; a moving branch is not an immutable release.
+For the current development snapshot, these commands need no commit placeholder.
+Record the printed commit and review it before applying; `main` is a moving
+development branch, not an immutable final release.
 
 ```sh
 git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git
 cd fail2ban-hybrid-manager
-git checkout --detach REVIEWED_COMMIT
+git switch --detach origin/main
+git rev-parse HEAD
 ```
 
 ### 🧪 Clean install — disposable host only
 
-Use a fresh supported Debian/Ubuntu test host with required dependencies/services.
-Review local mail, log paths, Docker networking and whitelists.
-Shipped whitelists contain loopback only; do not commit site-specific settings.
+Use a fresh booted systemd Debian/Ubuntu amd64/arm64 test host. Ubuntu 26.04 ARM64
+is detected, not yet VM/reboot-certified. The default command checks prerequisites
+without changing the host. Shipped whitelists contain loopback only.
 
 ```sh
 cd releases/v0.34
-sudo bash INSTALL-ALL-v034.sh
+sudo bash INSTALL-ALL-v034.sh --check
+# Explicitly allow missing core packages to be installed; no manager install yet:
+sudo bash INSTALL-ALL-v034.sh --install-prerequisites
+# Check again, then explicitly back up/bootstrap verified stock persistence:
+sudo bash INSTALL-ALL-v034.sh --check
+sudo bash INSTALL-ALL-v034.sh --apply --bootstrap-stock-nft
 ```
 
-This **changes the host**. The installer refuses existing managed installations
-and unsafe global nftables flush configuration. Do not use cleanup flags as a
-dry run or upgrade path. Full clean-install/reboot validation is still required.
+Only `--install-prerequisites` and `--apply` authorize changes. Missing packages
+are listed exactly; stock nftables configuration must match the installed distro
+conffile and contain only harmless empty chains. Apply backs it up privately and
+replaces persistence with owned includes **without executing its global flush**.
+Unknown/custom configuration and existing/partial manager installs are refused.
+Foreign live tables/rules are preserved, not copied into manager persistence.
+
+The default core profile activates `recidive` and `manualblock`, not 13 jails.
+Add `--ssh` (optionally `--ssh-port 22`) to **each** command to select SSH journal
+jails/dependencies. `--docker` explicitly selects a Docker engine dependency and
+requires a working daemon; it is not installed otherwise. Two owned nft tables
+exist even without Docker to support the synchronization helper contract.
+`--npm-log-dir /path/to/real/logs` selects only log-backed web jails; NPM is not
+installed and missing traffic logs are never fabricated. `--mail-to` explicitly
+selects mail dependencies/actions; configure/test the MTA separately. Do not copy
+these optional placeholder paths/addresses literally. Keep profile values private.
+
+See [fresh-install safety and dependencies](releases/v0.34/docs/FRESH-INSTALL.md).
+Cleanup flags are unsupported. Full clean-install/reboot validation is still required.
 
 ### 🔄 Existing v0.33 / v0.34-dev — staged upgrade package
 
