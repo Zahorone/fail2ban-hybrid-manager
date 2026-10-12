@@ -118,6 +118,12 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-unit-') as temporary:
             refused(m.nft_preflight)
             assert '# custom' in m.path('/etc/nftables.conf').read_text()
             m.path('/etc/nftables.conf').write_text(STOCK)
+            local_base = m.path('/etc/fail2ban/jail.conf')
+            local_base.parent.mkdir(parents=True, exist_ok=True)
+            local_base.write_text('# synthetic administrator edit\n')
+            with patch.object(m, 'conffiles', side_effect=lambda package: {'/etc/nftables.conf': digest} if package == 'nftables' else {'/etc/fail2ban/jail.conf': hashlib.md5(b'synthetic original').hexdigest()}):
+                refused(m.nft_preflight)
+            assert 'administrator edit' in local_base.read_text()
             foreign['nftables'].append({'table': {'family': 'inet', 'name': 'fail2ban-filter'}})
             refused(m.nft_preflight)
             foreign['nftables'].pop()

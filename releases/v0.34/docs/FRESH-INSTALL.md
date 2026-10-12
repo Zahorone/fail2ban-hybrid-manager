@@ -70,6 +70,8 @@ Canonical filters and regexes are unchanged; selection is a local jail override.
 The existing `/etc/nftables.conf` must be a regular file matching the installed
 nftables package conffile MD5 **and** an empty accept-chain template (or empty
 stock body). This is provenance/shape checking, not a cryptographic trust claim.
+Distribution Fail2Ban conffiles must also match package records; modified base
+files are not silently treated as fresh just because no `.local` file exists.
 Unknown/edited configuration, custom persistence/drop-ins, local Fail2Ban
 overrides, managed tables, symlinked installation paths or existing database ban
 history require manual review. Fresh installation never adopts/erases those bans.

@@ -132,7 +132,7 @@ def file_guards():
 def conffiles(package):
     result = run('dpkg-query', '-W', '-f=${Conffiles}', package, check=False)
     return {row[0]: row[1] for line in result.stdout.splitlines()
-            if len(row := line.split()) >= 2 and re.fullmatch('[0-9a-f]{32}', row[1])}
+            if len(row := line.split()) == 2 and re.fullmatch('[0-9a-f]{32}', row[1])}
 
 
 def stock_nft(contents, expected_md5):
@@ -159,8 +159,15 @@ def nft_preflight():
         table = entry.get('table', {})
         if table.get('family') == 'inet' and table.get('name') in OWNED:
             raise FreshError('Existing installation detected: managed nft table; use upgrade/recovery')
+    distribution = conffiles('fail2ban')
+    for name, expected in distribution.items():
+        if not name.startswith('/etc/fail2ban/'):
+            continue
+        file = path(name)
+        if file.is_symlink() or not file.is_file() or hashlib.md5(file.read_bytes()).hexdigest() != expected:
+            raise FreshError('Missing/modified distribution Fail2Ban configuration requires review: ' + name)
     for file in path('/etc/fail2ban/jail.d').glob('*'):
-        expected = conffiles('fail2ban').get('/etc/fail2ban/jail.d/' + file.name)
+        expected = distribution.get('/etc/fail2ban/jail.d/' + file.name)
         if not file.is_file() or not expected or hashlib.md5(file.read_bytes()).hexdigest() != expected:
             raise FreshError('Custom jail.d configuration requires review: ' + str(file))
     cron = run('crontab', '-l', check=False).stdout
@@ -226,9 +233,13 @@ def install(args, before, selected):
     mapping.update({Path('/etc/fail2ban/filter.d') / n: SOURCE / 'config' / n
                     for n in ('nginx-recon-optimized.local', 'f2b-anomaly-detection.local')})
     # Refuse unexpected pre-existing managed paths outside distribution config.
+    distribution = conffiles('fail2ban')
     for target in mapping:
-        if not str(target).startswith('/etc/fail2ban/') and path(str(target)).exists():
-            raise FreshError('Existing managed target requires review: ' + str(target))
+        existing = path(str(target))
+        if existing.exists() or existing.is_symlink():
+            expected = distribution.get(str(target))
+            if existing.is_symlink() or not existing.is_file() or not expected or hashlib.md5(existing.read_bytes()).hexdigest() != expected:
+                raise FreshError('Existing managed target requires review: ' + str(target))
     run('systemctl', 'is-active', '--quiet', 'cron', check=False)
     status = run('fail2ban-client', 'status', check=False)
     if status.returncode == 0:
