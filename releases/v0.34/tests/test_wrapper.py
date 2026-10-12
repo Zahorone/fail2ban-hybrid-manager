@@ -5,7 +5,7 @@ import subprocess
 source = (pathlib.Path(__file__).resolve().parents[1] / 'scripts/f2b-wrapper-v034.sh').read_text()
 # Exercise actual patched functions with mocked read-only service commands.
 functions = []
-for name in ('validate_ip', 'canonical_ips', 'get_f2b_ips', 'get_f2b_count', 'runtime_snapshot', 'ipv6_set_for_jail'):
+for name in ('validate_ip', 'canonical_ips', 'get_f2b_ips', 'get_f2b_count', 'runtime_snapshot', 'service_state', 'ipv6_set_for_jail'):
     functions.append(re.search(r'^' + name + r'\(\) \{\n.*?^\}', source, re.M | re.S)[0])
 test = 'set -e\n[[ ${BASH_VERSINFO[0]} -ge 4 ]] || { echo "Bash 4+ required"; exit 1; }\n' + '\n'.join(functions) + r'''
 log_error() { :; }
@@ -47,6 +47,8 @@ if runtime_snapshot; then exit 14; fi
 if get_f2b_count manualblock all; then exit 15; fi
 sudo() { printf '%s\n' 'API error masquerading as success'; }
 if get_f2b_ips web; then exit 16; fi
+systemctl() { printf '%s\n' inactive; return 3; }
+[[ $(service_state nftables) == inactive ]] || exit 19
 '''
 subprocess.run(['bash', '-c', test], check=True)
 assert 'f2b-runtime-verify.py --sync-check' in source

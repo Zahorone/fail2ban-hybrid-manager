@@ -332,6 +332,15 @@ print("\n".join(names))') || return 1
   RUNTIME_SNAPSHOT_READY=true
 }
 
+service_state() {
+  local state
+  state=$(systemctl is-active "$1" 2>/dev/null) || :
+  case "$state" in
+    active|inactive|failed|activating|deactivating|reloading) printf '%s\n' "$state" ;;
+    *) printf '%s\n' unknown ;;
+  esac
+}
+
 get_nft_ips() {
   local set="$1"
 
@@ -619,7 +628,8 @@ f2b_status() {
   echo
   echo "NFT Tables:"
   local tables
-  tables=$(sudo nft list tables 2>/dev/null | grep -E "fail2ban|docker-block" | sed 's/^/  - /')
+  tables=$(sudo nft list tables) || return 1
+  tables=$(printf '%s\n' "$tables" | grep -E "fail2ban|docker-block" | sed 's/^/  - /')
   if [ -n "${tables}" ]; then
     echo "${tables}"
   else
@@ -1659,8 +1669,8 @@ report_json() {
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "version": "${VERSION}",
   "services": {
-    "nftables": "$(systemctl is-active nftables 2>/dev/null || echo "unknown")",
-    "fail2ban": "$(systemctl is-active fail2ban 2>/dev/null || echo "unknown")",
+    "nftables": "$(service_state nftables)",
+    "fail2ban": "$(service_state fail2ban)",
     "docker_block": "$(sudo nft list table inet docker-block &>/dev/null && echo "active" || echo "inactive")"
   },
   "statistics": {
@@ -1698,8 +1708,8 @@ report_daily() {
     echo ""
 
     echo "Services:"
-    echo " nftables: $(systemctl is-active nftables 2>/dev/null || echo "unknown")"
-    echo " fail2ban: $(systemctl is-active fail2ban 2>/dev/null || echo "unknown")"
+    echo " nftables: $(service_state nftables)"
+    echo " fail2ban: $(service_state fail2ban)"
     echo ""
 
     echo "Jail Statistics:"
