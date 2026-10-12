@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path('/')
 SOURCE = Path(__file__).resolve().parents[1]
@@ -27,8 +28,8 @@ class FreshError(RuntimeError):
     pass
 
 
-def run(*args, check=True):
-    result = subprocess.run(args, text=True, capture_output=True)
+def run(*args, check=True, timeout=None):
+    result = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
     if check and result.returncode:
         raise FreshError('Command failed: ' + ' '.join(args) + '\n' + result.stdout[-1500:] + result.stderr)
     return result
@@ -224,6 +225,26 @@ def load_upgrade():
     return module
 
 
+def wait_ready(expected, timeout=60):
+    """systemd start completion does not imply a usable Fail2Ban socket."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            remaining = max(0.01, deadline - time.monotonic())
+            ping = run('fail2ban-client', 'ping', check=False, timeout=min(3, remaining))
+            if ping.returncode == 0 and ping.stdout.strip() == 'Server replied: pong':
+                remaining = max(0.01, deadline - time.monotonic())
+                status = run('fail2ban-client', 'status', check=False, timeout=min(3, remaining))
+                names = re.search(r'Jail list:\s*([^\r\n]*)', status.stdout)
+                if status.returncode == 0 and names and {
+                        n.strip() for n in names[1].split(',') if n.strip()} == set(expected):
+                    return
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+    raise FreshError('Fail2Ban readiness deadline exceeded (ping/selected active jails); preserve backup and use recovery')
+
+
 def install(args, before, selected):
     if not args.bootstrap_stock_nft:
         raise FreshError('Apply requires --bootstrap-stock-nft: explicit backup/scoped-persistence consent')
@@ -285,6 +306,7 @@ def install(args, before, selected):
         run('fail2ban-client', '-t')
         run('systemctl', 'enable', '--now', 'cron')
         run('systemctl', 'enable', '--now', 'fail2ban')
+        wait_ready(selected[1])
         run('/usr/bin/python3', '/usr/local/sbin/f2b-ipv6-sync.py')
         run('/usr/bin/python3', '/usr/local/sbin/f2b-save-owned-tables.py')
         actual = run('fail2ban-client', 'status').stdout

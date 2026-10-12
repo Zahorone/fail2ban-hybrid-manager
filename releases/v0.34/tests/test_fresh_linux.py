@@ -57,9 +57,10 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
     stubs.mkdir()
     (stubs / 'systemctl').write_text('#!/bin/sh\ncase "$*" in\n'
         '"stop fail2ban") fail2ban-client stop >/dev/null 2>&1; exit 0;;\n'
-        '"enable --now fail2ban") exec fail2ban-client -x start;;\n'
+        '"enable --now fail2ban") (sleep 1; fail2ban-client -x start) >/dev/null 2>&1 & exit 0;;\n'
         '"is-active --quiet fail2ban") exec fail2ban-client ping >/dev/null 2>&1;;\n'
         '"is-enabled --quiet nftables.service") exit 1;;\n'
+        '"is-enabled --quiet nftables"|"is-enabled --quiet fail2ban"|"is-enabled --quiet cron"|"is-active --quiet cron") exit 0;;\n'
         '"list-unit-files") echo fail2ban.service;;\n'
         '"daemon-reload"|"enable nftables.service"|"enable --now cron"|"is-active --quiet cron") exit 0;;\n'
         '*) echo "Forbidden systemctl: $*" >&2; exit 99;;\nesac\n')
@@ -93,6 +94,35 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         for family, ip in ((4, '192.0.2.7'), (6, '2001:db8::7')):
             elements = run('nft', 'list', 'set', 'inet', 'docker-block', 'docker-banned-ipv' + str(family)).stdout
             assert ip in elements
+        run('/usr/bin/python3', '/usr/local/libexec/f2b-runtime-verify.py', '--docker-check')
+        run('bash', '/usr/local/bin/f2b', 'sync', 'check')
+        audit = run('bash', '/usr/local/bin/f2b', 'audit').stdout
+        assert 'Total Jails' in audit and 'nginx-php-errors' not in audit
+        # Reconstruct the exact known partial legacy payload, retaining live bans.
+        recovery_spec = importlib.util.spec_from_file_location('recovery', source / 'scripts/recover-fresh.py')
+        recovery = importlib.util.module_from_spec(recovery_spec); recovery_spec.loader.exec_module(recovery)
+        recovery.fresh.conffiles = m.conffiles
+        for target, payload in recovery.mapping().items():
+            target.write_bytes(recovery.legacy_bytes(payload))
+        marker = Path('/etc/f2b/fresh-install.state')
+        marker.write_text('incomplete; inspect backup before recovery\n')
+        backup = next(Path('/var/backups').glob('f2b-fresh-*'))
+        recovery.inspect(backup)
+        profile_file = Path('/etc/fail2ban/jail.d/zz-f2b-fresh-profile.local')
+        original_profile = profile_file.read_bytes()
+        profile_file.write_bytes(original_profile + b'# unknown local change\n')
+        try: recovery.inspect(backup)
+        except recovery.fresh.FreshError: pass
+        else: raise AssertionError('Recovery accepted changed profile')
+        profile_file.write_bytes(original_profile)
+        # Execute the actual recovery main with the synthetic package MD5 hook.
+        import sys
+        original_argv = sys.argv
+        sys.argv = ['recover-fresh.py', '--backup', str(backup), '--apply']
+        try: assert recovery.main() == 0
+        finally: sys.argv = original_argv
+        assert marker.read_text() == 'complete\n'
+        run('bash', '/usr/local/bin/f2b', 'sync', 'check')
         after = json.loads(run('nft', '-j', 'list', 'ruleset').stdout)
         assert m.load_upgrade().external_nft_digest(before) == m.load_upgrade().external_nft_digest(after)
         config_before = Path('/etc/nftables.conf').read_bytes()

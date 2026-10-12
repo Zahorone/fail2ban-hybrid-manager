@@ -253,30 +253,13 @@ cleanup_tmp() { [ -n "${1:-}" ] && rm -f "$1"; }
 #  - v4: iba IPv4 (počítané cez get_f2b_ips + grep)
 #  - v6: iba IPv6
 get_f2b_count() {
-  local jail="$1"
-  local family="${2:-all}"   # all|v4|v6
-
+  local jail="$1" family="${2:-all}" addresses
+  addresses=$(get_f2b_ips "$jail") || return 1
   case "$family" in
-    all)
-      # zachovaj pôvodné správanie (rýchle)
-      local count
-      count=$(sudo fail2ban-client status "$jail" 2>/dev/null \
-        | grep "Currently banned" \
-        | awk '{print $NF}' \
-        | head -n1 \
-        | tr -d '[:space:]')
-      echo "${count:-0}"
-      ;;
-    v4)
-      get_f2b_ips "$jail" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | wc -l | tr -d '[:space:]'
-      ;;
-    v6)
-      get_f2b_ips "$jail" | grep -F ':' | wc -l | tr -d '[:space:]'
-      ;;
-    *)
-      log_error "get_f2b_count: invalid family '$family' (use all|v4|v6)"
-      return 1
-      ;;
+    all) printf '%s\n' "$addresses" | awk 'NF { n++ } END { print n+0 }' ;;
+    v4) printf '%s\n' "$addresses" | awk '/\./ { n++ } END { print n+0 }' ;;
+    v6) printf '%s\n' "$addresses" | awk '/:/ { n++ } END { print n+0 }' ;;
+    *) return 1 ;;
   esac
 }
 
@@ -317,8 +300,36 @@ for token in sys.stdin.read().split():
 
 get_f2b_ips() {
   local jail="$1" result
+  if [[ "${RUNTIME_SNAPSHOT_READY:-false}" == true ]]; then
+    [[ "${RUNTIME_BANS[$jail]+present}" == present ]] || return 1
+    printf '%s\n' "${RUNTIME_BANS[$jail]}"
+    return 0
+  fi
   result=$(sudo fail2ban-client get "$jail" banip 2>/dev/null) || return 1
-  printf '%s\n' "$result" | canonical_ips | sort -u
+  printf '%s\n' "$result" | python3 -c 'import ipaddress,sys
+try:
+ for value in sorted({str(ipaddress.ip_address(x)) for x in sys.stdin.read().split()}): print(value)
+except ValueError: sys.exit(1)'
+}
+
+runtime_snapshot() {
+  local status names jail addresses
+  status=$(sudo fail2ban-client status) || return 1
+  names=$(printf '%s\n' "$status" | python3 -c 'import re,sys
+m=re.search(r"Jail list:[ \t]*([^\r\n]*)",sys.stdin.read())
+if not m: sys.exit(1)
+names=[x.strip() for x in m[1].split(",") if x.strip()]
+if not names or not all(re.fullmatch(r"[A-Za-z0-9_.:-]+",x) for x in names): sys.exit(1)
+print("\n".join(names))') || return 1
+  JAILS=()
+  declare -gA RUNTIME_BANS=()
+  RUNTIME_SNAPSHOT_READY=false
+  while IFS= read -r jail; do
+    addresses=$(get_f2b_ips "$jail") || return 1
+    JAILS+=("$jail")
+    RUNTIME_BANS["$jail"]="$addresses"
+  done <<< "$names"
+  RUNTIME_SNAPSHOT_READY=true
 }
 
 get_nft_ips() {
@@ -582,7 +593,7 @@ f2b_status() {
   if systemctl is-active --quiet nftables 2>/dev/null; then
     log_success "nftables active"
   else
-    log_error   "nftables inactive"
+    log_warn "nftables unit inactive (may be enabled for boot; inspect live tables below)"
   fi
 
   if systemctl is-active --quiet fail2ban 2>/dev/null; then
@@ -599,21 +610,11 @@ f2b_status() {
 
   echo
   echo "Active Jails:"
-  if ! fail2ban-client status 2>/dev/null | grep "Jail list" >/dev/null 2>&1; then
-    log_error "Could not retrieve jails"
-  else
-    fail2ban-client status 2>/dev/null \
-      | grep "Jail list" \
-      | sed 's/.*Jail list:\s*//' \
-      | tr ',' '\n' \
-      | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-      | while read -r jail; do
-          [ -z "${jail}" ] && continue
-          local count
-          count=$(get_f2b_count "${jail}" all | tr -d ' ')
-          echo "  - ${jail}: ${count} IPs"
-        done
-  fi
+  local jail count
+  for jail in "${JAILS[@]}"; do
+    count=$(get_f2b_count "$jail" all) || return 1
+    echo "  - ${jail}: ${count} IPs"
+  done
 
   echo
   echo "NFT Tables:"
@@ -763,74 +764,7 @@ f2b_find() {
 
 # f2b_sync_check – porovná F2B a nft counts pre každý jail (v4 + v6)
 f2b_sync_check() {
-  log_header "═══════════════════════════════════════════════════════"
-  echo " Fail2Ban ↔ nftables Sync Check (IPv4 + IPv6)"
-  log_header "═══════════════════════════════════════════════════════"
-  echo ""
-
-  local ALLSYNCED=true
-
-  for jail in "${JAILS[@]}"; do
-    local nftset="$(ipv4_set_for_jail "$jail")"
-
-    # F2B counts (v4/v6)
-    local F4 F6
-    F4="$(get_f2b_ips "$jail" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | wc -l | tr -d '[:space:]')"
-    F6="$(get_f2b_ips "$jail" | grep -F ':' | wc -l | tr -d '[:space:]')"
-
-    # nftables counts (v4/v6)
-    local N4 N6
-    N4=0; N6=0
-
-    if [ -n "$nftset" ]; then
-      # v4 set
-      if sudo nft list set $F2BTABLE "$nftset" &>/dev/null; then
-        N4="$(get_nft_ips "$nftset" | wc -l | tr -d '[:space:]')"
-      fi
-      # v6 set (expected name: ${nftset}-v6)
-      local nftset6
-      if nftset6=$(ipv6_set_for_jail "$jail"); then
-        N6="$(get_nft_ips "$nftset6" | wc -l | tr -d '[:space:]')"
-      fi
-    fi
-
-    local DIFF4 DIFF6 DIFF4ABS DIFF6ABS
-    DIFF4=$((F4 - N4)); DIFF4ABS=${DIFF4#-}
-    DIFF6=$((F6 - N6)); DIFF6ABS=${DIFF6#-}
-
-    # Výpis pre jail
-    if [ "$F4" -eq "$N4" ] && [ "$F6" -eq "$N6" ]; then
-      log_success "[$jail] v4: $F4==$N4, v6: $F6==$N6"
-    else
-      # IPv4 časť
-      if [ "$F4" -eq "$N4" ]; then
-        log_info    "[$jail] IPv4: F2B=$F4, nft=$N4 (OK)"
-      elif [ "$DIFF4ABS" -le 1 ]; then
-        log_success "[$jail] IPv4: F2B=$F4, nft=$N4 (±1 range merge)"
-      else
-        log_warn    "[$jail] IPv4: F2B=$F4, nft=$N4 (MISMATCH)"
-        ALLSYNCED=false
-      fi
-
-      # IPv6 časť
-      if [ "$F6" -eq "$N6" ]; then
-        log_info    "[$jail] IPv6: F2B=$F6, nft=$N6 (OK)"
-      elif [ "$DIFF6ABS" -le 1 ]; then
-        log_success "[$jail] IPv6: F2B=$F6, nft=$N6 (±1 range merge)"
-      else
-        log_warn    "[$jail] IPv6: F2B=$F6, nft=$N6 (MISMATCH)"
-        ALLSYNCED=false
-      fi
-    fi
-  done
-
-  echo ""
-  if $ALLSYNCED; then
-    log_success "[OK] All jails synchronized (IPv4 + IPv6)!"
-  else
-    log_warn "Some jails out of sync - run 'f2b sync force'"
-  fi
-  echo ""
+  sudo /usr/bin/python3 /usr/local/libexec/f2b-runtime-verify.py --sync-check
 }
 
 
@@ -843,7 +777,7 @@ f2b_sync_enhanced() {
 
 # f2b_sync_force – alias na enhanced + check
 f2b_sync_force() {
-  f2b_sync_enhanced
+  f2b_sync_enhanced || return $?
   f2b_sync_check
 }
 
@@ -859,98 +793,7 @@ sync_silent() {
 ################################################################################
 
 f2b_docker_verify() {
-  log_header "F2B Docker-Block Deep Verify (IPv4 union)"
-
-  # 1) JAILY ↔ F2B NFT SETY
-  log_info "STEP 1: F2B jails vs F2B nft sets (IPv4 union)"
-
-  local ALL_JAILS ALL_SETS
-  local jail set
-
-  ALL_JAILS=$(
-    for jail in "${JAILS[@]}"; do
-      get_f2b_ips "$jail" 2>/dev/null \
-        | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || true
-    done | sort -u
-  )
-
-  ALL_SETS=$(
-    for set in \
-      f2b-sshd \
-      f2b-sshd-slowattack \
-      f2b-exploit-critical \
-      f2b-webshell-sweep \
-      f2b-dos-high \
-      f2b-web-medium \
-      f2b-nginx-recon-bonus \
-      f2b-recidive \
-      f2b-manualblock \
-      f2b-fuzzing-payloads \
-      f2b-botnet-signatures \
-      f2b-anomaly-detection \
-      f2b-nginx-php-errors; do
-      sudo nft list set inet fail2ban-filter "$set" 2>/dev/null \
-        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' || true
-    done | sort -u
-  )
-
-  local JAIL_NOT_IN_SET SET_NOT_IN_JAIL
-  JAIL_NOT_IN_SET=$(comm -23 <(echo "$ALL_JAILS") <(echo "$ALL_SETS") || true)
-  SET_NOT_IN_JAIL=$(comm -13 <(echo "$ALL_JAILS") <(echo "$ALL_SETS") || true)
-
-  if [[ -z "$JAIL_NOT_IN_SET" && -z "$SET_NOT_IN_JAIL" ]]; then
-    log_success "Jaily a F2B nft sety sú 1:1 (IPv4 union)."
-  else
-    log_warn "Rozdiely medzi jailmi a F2B setmi (IPv4):"
-    [[ -n "$JAIL_NOT_IN_SET" ]] && {
-      echo "  - V jailoch, nie v F2B setoch:"
-      echo "$JAIL_NOT_IN_SET"
-    }
-    [[ -n "$SET_NOT_IN_JAIL" ]] && {
-      echo "  - Vo F2B setoch, nie v jailoch:"
-      echo "$SET_NOT_IN_JAIL"
-    }
-  fi
-
-  echo
-  log_info "STEP 2: Membership check: ALL F2B nft IPs are contained in docker-block (IPv4 union)"
-
-  if ! sudo nft list table inet docker-block >/dev/null 2>&1; then
-    log_error "docker-block table NOT FOUND (install docker-block v0.4 first)."
-    return 1
-  fi
-
-  local miss_count=0
-  local max_sample=20
-
-  while read -r ip; do
-    sudo nft get element inet docker-block docker-banned-ipv4 "{ $ip }" >/dev/null 2>&1 \
-      || {
-        miss_count=$((miss_count+1))
-        if [ "$miss_count" -le "$max_sample" ]; then
-          log_warn "MISS $ip"
-        fi
-      }
-  done < <(echo "$ALL_SETS")
-
-  if [ "$miss_count" -eq 0 ]; then
-    log_success "docker-block obsahuje všetky IP z F2B setov (0 misses)."
-  else
-    log_warn "docker-block NEobsahuje všetky IP z F2B setov: misses=$miss_count (vypísané prvé $max_sample)."
-    return 2
-  fi
-
-  echo
-  log_info "STEP 3: Súhrn počtov (IPv4)"
-
-  local JAIL_UNIQUE SET_UNIQUE
-  JAIL_UNIQUE=$(echo "$ALL_JAILS" | wc -l | tr -d '[:space:]')
-  SET_UNIQUE=$(echo "$ALL_SETS"  | wc -l | tr -d '[:space:]')
-
-  echo "  Jaily IPv4 unique:       $JAIL_UNIQUE"
-  echo "  F2B sety IPv4 unique:    $SET_UNIQUE"
-  echo
-  log_info "Poznámka: reálna konzistencia F2B → docker-block sa rieši v STEP 2 (nftables interval/auto-merge robí plain count porovnania nepresné)."
+  sudo /usr/bin/python3 /usr/local/libexec/f2b-runtime-verify.py --docker-check
 }
 
 ################################################################################
@@ -2841,6 +2684,13 @@ main() {
     esac
 
     # Initialize log file
+    # Capture one validated active-profile snapshot before any diagnostic output.
+    # Disabled jails are not queried; API failures must not become ALL CLEAN.
+    case "$1" in
+        status|audit|find|monitor|report|audit-silent|stats-quick|docker)
+            runtime_snapshot || { log_error "Fail2Ban runtime read failed; no successful report generated"; return 1; }
+            ;;
+    esac
     mkdir -p "$(dirname "$LOGFILE")"
     touch "$LOGFILE"
 
@@ -2939,7 +2789,9 @@ main() {
                 return 1
                 ;;
         esac
+        local report_result=$?
         release_lock
+        return "$report_result"
         ;;
 
 
