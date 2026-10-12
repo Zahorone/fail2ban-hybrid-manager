@@ -61,6 +61,8 @@ is opt-in; apt errors or still-missing prerequisites stop the workflow.
 Repeat the **same** optional profile arguments for prerequisite setup, read-only
 check and apply. Two owned nft tables are always created for helper compatibility,
 but that does not mean Docker is installed or external Docker traffic was tested.
+The new table uses interface-name matching, so a missing `docker0` does not
+prevent stock bootstrap; see the [nftables interface semantics](https://netfilter.org/projects/nftables/manpage.html).
 Canonical filters and regexes are unchanged; selection is a local jail override.
 
 ## Stock bootstrap and foreign state

@@ -31,6 +31,8 @@ custom = STOCK.replace('priority filter;', 'priority filter; policy drop;')
 assert not m.stock_nft(custom, hashlib.md5(custom.encode()).hexdigest())
 
 docker_source = (m.SOURCE / 'scripts/04-install-docker-block-v034.sh').read_text()
+assert 'iifname "docker0" return' in docker_source
+assert 'iif "docker0" return' not in docker_source
 counting = re.search(r'  BANNED_SNAPSHOT=.*?\n  BANNED=.*?\n', docker_source, re.S)[0]
 for payload, expected in (('table inet docker-block { set docker-banned-ipv4 { } }', '0'),
                           ('elements = { 192.0.2.7, 198.51.100.9 }', '2')):

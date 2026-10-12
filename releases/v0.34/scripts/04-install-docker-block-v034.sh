@@ -122,10 +122,11 @@ table inet docker-block {
     ip6 saddr @docker-banned-ipv6 drop
 
     # Allow localhost to access Docker ports
-    iif "lo" return
+    iifname "lo" return
 
     # Allow Docker bridge
-    iif "docker0" return
+    # Match by name: Docker is optional and may create this interface later.
+    iifname "docker0" return
 
     # Block external access to blocked ports
     tcp dport @docker-blocked-ports drop
@@ -217,7 +218,7 @@ else
   NFT_CHECK=(nft -c -f "$NFTABLES_CONF")
 fi
 
-if "${NFT_CHECK[@]}" >/dev/null 2>&1; then
+if "${NFT_CHECK[@]}" >/dev/null; then
   log "nftables configuration is valid"
 else
   error "nftables configuration has errors (isolated nft -c failed)"

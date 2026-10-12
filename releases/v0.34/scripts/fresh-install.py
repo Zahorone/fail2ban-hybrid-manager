@@ -30,7 +30,7 @@ class FreshError(RuntimeError):
 def run(*args, check=True):
     result = subprocess.run(args, text=True, capture_output=True)
     if check and result.returncode:
-        raise FreshError('Command failed: ' + ' '.join(args) + '\n' + result.stderr)
+        raise FreshError('Command failed: ' + ' '.join(args) + '\n' + result.stdout[-1500:] + result.stderr)
     return result
 
 

@@ -102,7 +102,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         assert Path('/etc/nftables.conf').read_bytes() == config_before
         commands = nft_log.read_text()
         assert 'flush ruleset' not in commands
-        assert '-f /etc/nftables.conf' not in commands
+        assert all('-c -f /etc/nftables.conf' in line for line in commands.splitlines()
+                   if '-f /etc/nftables.conf' in line), 'Only isolated syntax checks may read persistence'
         assert 'delete table' not in commands
         print('PASS: real fresh core install, active/log-backed jail count, dual-family bans, scoped persistence, foreign-rule preservation and rerun refusal (systemd simulated)')
     finally:
