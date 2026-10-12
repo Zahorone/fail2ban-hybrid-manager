@@ -34,6 +34,14 @@ sudo() {
 runtime_snapshot || exit 12
 [[ ${#JAILS[@]} == 2 && $(get_f2b_count manualblock all) == 0 ]] || exit 13
 RUNTIME_SNAPSHOT_READY=false
+sudo() {
+ if [[ "$*" == 'fail2ban-client status' ]]; then
+   printf 'Jail list: manualblock, recidive\n'; return
+ fi
+ [[ "$*" == 'fail2ban-client get manualblock banip' ]] || return 42
+}
+if runtime_snapshot; then exit 17; fi
+[[ "$RUNTIME_SNAPSHOT_READY" == false ]] || exit 18
 sudo() { return 42; }
 if runtime_snapshot; then exit 14; fi
 if get_f2b_count manualblock all; then exit 15; fi

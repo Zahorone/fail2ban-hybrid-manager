@@ -108,6 +108,18 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         marker.write_text('incomplete; inspect backup before recovery\n')
         backup = next(Path('/var/backups').glob('f2b-fresh-*'))
         recovery.inspect(backup)
+        backup.chmod(0o755)
+        try: recovery.inspect(backup)
+        except recovery.fresh.FreshError: pass
+        else: raise AssertionError('Recovery accepted non-private backup')
+        backup.chmod(0o700)
+        foreign_file = backup / 'foreign-firewall.json'
+        original_foreign = foreign_file.read_bytes()
+        foreign_file.write_text('{"nftables": []}')
+        try: recovery.inspect(backup)
+        except recovery.fresh.FreshError: pass
+        else: raise AssertionError('Recovery accepted foreign firewall mismatch')
+        foreign_file.write_bytes(original_foreign)
         profile_file = Path('/etc/fail2ban/jail.d/zz-f2b-fresh-profile.local')
         original_profile = profile_file.read_bytes()
         profile_file.write_bytes(original_profile + b'# unknown local change\n')
