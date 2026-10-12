@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-unit-') as temporary:
             original = m.path('/etc/nftables.conf').read_bytes()
             assert m.nft_preflight() == foreign
             assert m.path('/etc/nftables.conf').read_bytes() == original
-            assert all(parts in {('dpkg', '--print-architecture'), ('systemctl', 'show', '--property=Version', '--value'), ('dpkg-query', '-W', '-f=${Conffiles}', 'nftables'), ('nft', '-j', 'list', 'ruleset'), ('crontab', '-l')} for parts in calls)
+            assert all(parts in {('dpkg', '--print-architecture'), ('systemctl', 'show', '--property=Version', '--value'), ('dpkg-query', '-W', '-f=${Conffiles}', 'nftables'), ('dpkg-query', '-W', '-f=${Conffiles}', 'fail2ban'), ('nft', '-j', 'list', 'ruleset'), ('crontab', '-l')} for parts in calls)
             m.path('/etc/nftables.conf').write_text('flush ruleset\n# custom\n')
             refused(m.nft_preflight)
             assert '# custom' in m.path('/etc/nftables.conf').read_text()
