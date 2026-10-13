@@ -147,6 +147,75 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         assert all('-c -f /etc/nftables.conf' in line for line in commands.splitlines()
                    if '-f /etc/nftables.conf' in line), 'Only isolated syntax checks may read persistence'
         assert 'delete table' not in commands
+        # Synthetic reconstruction of the complete old five-jail NPM profile.
+        # This is fixture setup, NOT a supported core profile-add operation.
+        import datetime
+        import time
+        import types
+        legacy = types.ModuleType('legacy_npm_fresh')
+        legacy.__file__ = str(source / 'scripts/fresh-install.py')
+        old_code = run('git', '-C', str(source.parents[1]), 'show',
+                       '393abab:releases/v0.34/scripts/fresh-install.py').stdout
+        exec(compile(old_code, legacy.__file__, 'exec'), legacy.__dict__)
+        logs = Path('/opt/f2b-npm-lab/data/logs'); logs.mkdir(parents=True)
+        for name in ('fallback_http_access.log', 'fallback_http_error.log', 'fallback_error.log',
+                     'backend.log', 'fallback_stream_access.log'):
+            (logs / name).touch()
+        args.npm_log_dir = logs
+        old_profile = legacy.policy(args)
+        assert len(old_profile[1]) == 5
+        old_profile[0]['DEFAULT']['ignoreip'] = '127.0.0.1/8 ::1 192.0.2.99'
+        with profile_file.open('w') as stream: old_profile[0].write(stream)
+        verifier_path = Path('/usr/local/libexec/f2b-runtime-verify.py')
+        verifier_path.write_text(run('git', '-C', str(source.parents[1]), 'show',
+                                    '393abab:releases/v0.34/scripts/upgrade-v034dev-canary-227c393.py').stdout)
+        run('fail2ban-client', 'reload')
+        assert 'fallback_http_access.log' not in run('fail2ban-client', 'get', 'f2b-exploit-critical', 'logpath').stdout
+        repair_spec = importlib.util.spec_from_file_location('repair_npm', source / 'scripts/repair-npm-http.py')
+        repair = importlib.util.module_from_spec(repair_spec); repair_spec.loader.exec_module(repair)
+        original_targets = {file: file.read_bytes() for file in (repair.PROFILE, repair.SWEEP, repair.VERIFIER)}
+        plan = repair.preflight(logs)
+        assert all(file.read_bytes() == value for file, value in original_targets.items()), 'Preflight modified targets'
+        original_command = repair.fresh.run
+        injected = [False]
+        def fail_once(*parts, **kwargs):
+            if parts == ('fail2ban-client', '-t') and not injected[0]:
+                injected[0] = True
+                raise repair.fresh.FreshError('Synthetic post-write failure')
+            return original_command(*parts, **kwargs)
+        repair.fresh.run = fail_once
+        try: repair.apply(plan, Path('/var/backups'))
+        except repair.fresh.FreshError as error: assert 'rollback verification' in str(error)
+        else: raise AssertionError('Expected repair rollback')
+        finally: repair.fresh.run = original_command
+        assert all(file.read_bytes() == value for file, value in original_targets.items())
+        plan = repair.preflight(logs)
+        repair.apply(plan, Path('/var/backups'))
+        assert 'fallback_http_access.log' in run('fail2ban-client', 'get', 'f2b-exploit-critical', 'logpath').stdout
+        assert '192.0.2.99' in run('fail2ban-client', 'get', 'manualblock', 'ignoreip').stdout
+        run('/usr/bin/python3', str(verifier_path), '--npm-coverage')
+        # Real polling pipeline, synthetic standard-format entries with current time.
+        def entry(target, address):
+            stamp = datetime.datetime.now().astimezone().strftime('%d/%b/%Y:%H:%M:%S %z')
+            return f'[{stamp}] 404 - GET http test.example "{target}" [Client {address}] [Length 153] [Gzip -] "curl" "-"\n'
+        def wait_bans(jail, expected):
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if expected <= set(run('fail2ban-client', 'get', jail, 'banip').stdout.split()): return
+                time.sleep(0.1)
+            raise AssertionError('Synthetic NPM standard format did not reach expected jail ban')
+        with (logs / 'fallback_http_access.log').open('a') as stream:
+            for address in ('192.0.2.27', '2001:db8::27'):
+                stream.write(entry('/this_is_a_new_hello_world.php?f2b-lab=1', address))
+        wait_bans('f2b-exploit-critical', {'192.0.2.27', '2001:db8::27'})
+        with (logs / 'fallback_http_access.log').open('a') as stream:
+            for address in ('192.0.2.28', '2001:db8::28'):
+                for suffix in ('one', 'two', 'three'):
+                    stream.write(entry('/lab-missing-' + suffix + '.php', address))
+        wait_bans('f2b-webshell-sweep', {'192.0.2.28', '2001:db8::28'})
+        run('/usr/bin/python3', '/usr/local/sbin/f2b-ipv6-sync.py')
+        run('/usr/bin/python3', str(verifier_path), '--docker-check')
+        print('PASS: old error-only NPM profile repaired, rollback verified, whitelist/timed bans preserved and real polling auto-ban for both families (synthetic logs, not packets)')
         print('PASS: real fresh core install, active/log-backed jail count, dual-family bans, scoped persistence, foreign-rule preservation and rerun refusal (systemd simulated)')
     finally:
         run('fail2ban-client', 'stop', check=False)

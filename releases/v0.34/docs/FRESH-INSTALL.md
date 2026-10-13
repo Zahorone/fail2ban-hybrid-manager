@@ -189,6 +189,12 @@ use a **different pre-manager VM** with Docker/NPM already serving real traffic.
 There is no supported fresh-rerun profile-add operation. Follow the separate
 [Docker/NPM lab and packet-test recipe](DOCKER-NPM-LAB.md).
 
+If an already complete old NPM profile monitors critical error logs but misses
+`fallback_http_access.log`, use the separate [HTTP coverage repair](NPM-HTTP-REPAIR.md).
+Do not rerun fresh apply. New selection uses known HTTP filenames, requires both
+access/error sources for critical, excludes stream/backend logs, and uses runtime
+coverage verification; synchronization counts alone are not detection coverage.
+
 ## Validation limits
 
 Unit fixtures cover stock vs unknown configurations, missing dependencies,
