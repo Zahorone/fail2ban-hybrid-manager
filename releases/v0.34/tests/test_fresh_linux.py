@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
     (stubs / 'sudo').write_text('#!/bin/sh\nexec "$@"\n')
     nft = shutil.which('nft')
     nft_log = temporary / 'nft-commands.txt'
-    (stubs / 'nft').write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + str(nft_log) + '"\nexec "' + nft + '" "$@"\n')
+    (stubs / 'nft').write_text('#!/bin/sh\nprintf "%s|%s\\n" "$(readlink /proc/self/ns/net)" "$*" >> "' + str(nft_log) + '"\nexec "' + nft + '" "$@"\n')
     for file in stubs.iterdir(): file.chmod(0o755)
     os.environ['PATH'] = str(stubs) + ':' + os.environ['PATH']
     os.environ['TERM'] = 'xterm'
@@ -144,8 +144,9 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         assert Path('/etc/nftables.conf').read_bytes() == config_before
         commands = nft_log.read_text()
         assert 'flush ruleset' not in commands
-        assert all('-c -f /etc/nftables.conf' in line for line in commands.splitlines()
-                   if '-f /etc/nftables.conf' in line), 'Only isolated syntax checks may read persistence'
+        namespace = os.readlink('/proc/self/ns/net')
+        assert all(line.split('|', 1)[0] != namespace or '-c -f /etc/nftables.conf' in line
+                   for line in commands.splitlines() if '-f /etc/nftables.conf' in line), 'Persistence loads must be in a separate private netns'
         assert 'delete table' not in commands
         # Synthetic reconstruction of the complete old five-jail NPM profile.
         # This is fixture setup, NOT a supported core profile-add operation.

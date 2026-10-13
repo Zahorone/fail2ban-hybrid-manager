@@ -1069,114 +1069,21 @@ EOF
 ################################################################################
 
 manage_block_port() {
-    local port
-    port="$1"
-    if [ -z "$port" ]; then
-        log_error "Usage: manage block-port <port>"
-        return 1
-    fi
-
-    if ! validate_port "$port"; then
-        return 1
-    fi
-
-    log_header "Blocking port $port (persistent)"
-
-    if sudo nft add element inet docker-block docker-blocked-ports "{ $port }" 2>/dev/null; then
-        log_success "Port $port added to runtime"
-    else
-        log_warn "Port $port might already be in runtime set"
-    fi
-
-    local NFT_DOCKER_CONF="/etc/nftables.d/docker-block.nft"
-
-    if [ ! -f "$NFT_DOCKER_CONF" ]; then
-        log_error "Config file not found: $NFT_DOCKER_CONF"
-        return 1
-    fi
-
-    local CURRENT_PORTS
-    CURRENT_PORTS=$(sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null \
-        | grep -oE '[0-9]+' | sort -un | tr '\n' ',' | sed 's/,$//')
-
-    if [ -z "$CURRENT_PORTS" ]; then
-        log_warn "No ports in runtime set"
-        return 0
-    fi
-
-    sudo cp "$NFT_DOCKER_CONF" "${NFT_DOCKER_CONF}.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-
-    sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-type inet_service\
-flags interval\
-auto-merge\
-elements = { '"$CURRENT_PORTS"' }\
-}' "$NFT_DOCKER_CONF"
-
-    log_success "Port $port persisted to $NFT_DOCKER_CONF"
-    log_info "Blocked ports: $CURRENT_PORTS"
-
-    echo ""
+    local port="$1"
+    validate_port "$port" || return 1
+    # The helper owns shared locks, backup, validation and rollback.
+    # Never log success before its verified commit succeeds.
+    sudo /usr/bin/python3 /usr/local/sbin/f2b-save-owned-tables.py --block-port "$port" || return $?
+    log_success "Port $port blocked; runtime and persistence verified"
 }
 
 manage_unblock_port() {
-    local port
-    port="$1"
-    if [ -z "$port" ]; then
-        log_error "Usage: manage unblock-port <port>"
-        return 1
-    fi
-
-    if ! validate_port "$port"; then
-        return 1
-    fi
-
-    log_header "Unblocking port $port (persistent)"
-
-    if sudo nft delete element inet docker-block docker-blocked-ports "{ $port }" 2>/dev/null; then
-        log_success "Port $port removed from runtime"
-    else
-        log_error "Port $port not found in runtime"
-        return 1
-    fi
-
-    local NFT_DOCKER_CONF="/etc/nftables.d/docker-block.nft"
-
-    if [ ! -f "$NFT_DOCKER_CONF" ]; then
-        log_error "Config file not found: $NFT_DOCKER_CONF"
-        return 1
-    fi
-
-    local CURRENT_PORTS
-    CURRENT_PORTS=$(sudo nft list set inet docker-block docker-blocked-ports 2>/dev/null \
-        | grep -oE '[0-9]+' | sort -un | tr '\n' ',' | sed 's/,$//')
-
-    sudo cp "$NFT_DOCKER_CONF" "${NFT_DOCKER_CONF}.backup-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-
-    if [ -z "$CURRENT_PORTS" ]; then
-        sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-type inet_service\
-flags interval\
-auto-merge\
-elements = { }\
-}' "$NFT_DOCKER_CONF"
-
-        log_success "Port $port removed - no ports left in set"
-    else
-        sudo sed -i '/set docker-blocked-ports {/,/}/c\
-set docker-blocked-ports {\
-type inet_service\
-flags interval\
-auto-merge\
-elements = { '"$CURRENT_PORTS"' }\
-}' "$NFT_DOCKER_CONF"
-
-        log_success "Port $port removed - remaining: $CURRENT_PORTS"
-    fi
-
-    echo ""
+    local port="$1"
+    validate_port "$port" || return 1
+    # The helper owns shared locks, backup, validation and rollback.
+    # Never log success before its verified commit succeeds.
+    sudo /usr/bin/python3 /usr/local/sbin/f2b-save-owned-tables.py --unblock-port "$port" || return $?
+    log_success "Port $port unblocked; runtime and persistence verified"
 }
 
 manage_list_blocked_ports() {
