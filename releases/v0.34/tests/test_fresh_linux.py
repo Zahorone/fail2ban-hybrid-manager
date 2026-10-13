@@ -228,6 +228,56 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         wait_bans('f2b-webshell-sweep', {'192.0.2.28', '2001:db8::28'})
         run('/usr/bin/python3', '/usr/local/sbin/f2b-ipv6-sync.py')
         run('/usr/bin/python3', str(verifier_path), '--docker-check')
+        # Read-only diagnostic deployment: preserve config, the reconciler and
+        # port hotfix, ignore stale aliases, and fail on equal-count wrong members.
+        diag_spec = importlib.util.spec_from_file_location('diag_hotfix', source / 'scripts/install-diagnostic-hotfix.py')
+        diag = importlib.util.module_from_spec(diag_spec); diag_spec.loader.exec_module(diag)
+        config_before = repair.inventory()
+        port_before = (diag.function(diag.WRAPPER.read_text(), 'manage_block_port'),
+                       diag.function(diag.WRAPPER.read_text(), 'manage_unblock_port'))
+        sync_before = Path('/usr/local/sbin/f2b-ipv6-sync.py').read_bytes()
+        wrapper_before = diag.WRAPPER.read_bytes()
+        staged = diag.plan()
+        assert diag.WRAPPER.read_bytes() == wrapper_before and not diag.CHECKER.exists()
+        original_atomic = diag.atomic
+        once = [False]
+        def fail_wrapper(file, data):
+            if file == diag.WRAPPER and not once[0]:
+                once[0] = True; raise OSError('Synthetic diagnostic wrapper write failure')
+            return original_atomic(file, data)
+        diag.atomic = fail_wrapper
+        try: diag.apply(staged)
+        except OSError: pass
+        else: raise AssertionError('Diagnostic deployment must propagate write failure')
+        finally: diag.atomic = original_atomic
+        assert diag.WRAPPER.read_bytes() == wrapper_before and not diag.CHECKER.exists()
+        diag.apply(diag.plan())
+        assert repair.inventory() == config_before
+        assert Path('/usr/local/sbin/f2b-ipv6-sync.py').read_bytes() == sync_before
+        assert port_before == (diag.function(diag.WRAPPER.read_text(), 'manage_block_port'),
+                               diag.function(diag.WRAPPER.read_text(), 'manage_unblock_port'))
+        loaded = repair.fresh.load_upgrade().load_verifier()
+        references = loaded.diagnostic_action_sets('f2b-exploit-critical')
+        assert not any(ref[3] == 'f2b-exploit-critical' for ref in references)
+        run('nft', 'add', 'element', 'inet', 'fail2ban-filter', 'f2b-exploit-critical', '{ 192.0.2.199 }')
+        for address in ('192.0.2.8', '192.0.2.9', '2001:db8::8', '2001:db8::9'):
+            run('fail2ban-client', 'set', 'manualblock', 'banip', address)
+        run('/usr/bin/python3', '/usr/local/sbin/f2b-ipv6-sync.py')
+        run('bash', '/usr/local/bin/f2b', 'sync', 'check')
+        run('bash', '/usr/local/bin/f2b', 'docker', 'verify')
+        effective4 = next(ref[3] for ref in references if ref[0] == 4)
+        run('nft', 'delete', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.27 }')
+        run('nft', 'add', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.29 }')
+        before_check = run('nft', '-j', 'list', 'set', 'inet', 'fail2ban-filter', effective4).stdout
+        check = run('/usr/bin/python3', str(diag.CHECKER), '--sync-check', check=False)
+        assert check.returncode != 0 and 'Membership mismatch' in check.stderr
+        after_check = run('nft', '-j', 'list', 'set', 'inet', 'fail2ban-filter', effective4).stdout
+        assert '192.0.2.29' in before_check and '192.0.2.29' in after_check
+        # TEST-only cleanup, never performed by the diagnostic/hotfix itself.
+        run('nft', 'delete', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.29 }')
+        run('nft', 'add', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.27 }')
+        run('/usr/bin/python3', str(diag.CHECKER), '--docker-check')
+        print('PASS: scoped diagnostic-only deployment, unchanged filters/reconciler/port functions, stale aliases ignored, interval union and true mismatch nonzero without repair')
         print('PASS: old error-only NPM profile repaired, rollback verified, whitelist/timed bans preserved and real polling auto-ban for both families (synthetic logs, not packets)')
         print('PASS: real fresh core install, active/log-backed jail count, dual-family bans, scoped persistence, foreign-rule preservation and rerun refusal (systemd simulated)')
     finally:
