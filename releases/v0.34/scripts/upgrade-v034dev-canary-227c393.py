@@ -129,38 +129,173 @@ def snapshot_bans():
         result[jail] = sorted({str(ipaddress.ip_address(x)) for x in addresses})
     return result
 
+def diagnostic_socket(command):
+    # This deliberately has no dependency on the installed reconciler.
+    if not command or command[0] not in {'status', 'get'}:
+        raise UpgradeError('Diagnostic socket operation is not read-only')
+    from fail2ban.client.csocket import CSocket
+    socket = CSocket('/var/run/fail2ban/fail2ban.sock', timeout=15)
+    try: response = socket.send(command)
+    finally: socket.close()
+    if not isinstance(response, (list, tuple)) or len(response) != 2 or response[0] != 0:
+        raise UpgradeError('Fail2Ban read failed')
+    return response[1]
+
+
+def diagnostic_bans():
+    status = dict(diagnostic_socket(['status']))
+    names = status.get('Jail list')
+    if isinstance(names, str): names = [x.strip() for x in names.split(',') if x.strip()]
+    if not isinstance(names, (list, tuple)) or not names:
+        raise UpgradeError('No usable active jail list')
+    result = {}
+    for jail in names:
+        if not isinstance(jail, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]+', jail):
+            raise UpgradeError('Malformed active jail name')
+        values = diagnostic_socket(['get', jail, 'banip'])
+        if not isinstance(values, (list, tuple)) or not all(isinstance(x, str) for x in values):
+            raise UpgradeError('Malformed runtime ban list: ' + jail)
+        try: result[jail] = {str(ipaddress.ip_address(x)) for x in values}
+        except ValueError as error: raise UpgradeError('Malformed runtime address: ' + jail) from error
+    return result
+
+
+def diagnostic_action_sets(jail):
+    # Resolve LOADED properties, not SETMAP or a possibly unreloaded disk dump.
+    names = diagnostic_socket(['get', jail, 'actions'])
+    if not isinstance(names, (list, tuple)) or not all(isinstance(x, str) for x in names):
+        raise UpgradeError('Malformed runtime action list: ' + jail)
+    references = {}
+    for action in names:
+        keys = diagnostic_socket(['get', jail, 'actionproperties', action])
+        if not isinstance(keys, (list, tuple)) or not all(isinstance(x, str) for x in keys):
+            raise UpgradeError('Malformed action property list: ' + jail)
+        if 'actionban' not in keys: continue
+        command = diagnostic_socket(['get', jail, 'action', action, 'actionban'])
+        if not isinstance(command, str) or 'nft add element' not in command:
+            continue
+        props = {key: diagnostic_socket(['get', jail, 'action', action, key]) for key in keys if key != 'actionban'}
+        props['actionban'] = command
+        for version, family in ((4, 'inet4'), (6, 'inet6')):
+            values = {k: v for k, v in props.items() if '?' not in k}
+            values.update({k.split('?', 1)[0]: v for k, v in props.items() if k.endswith('?family=' + family)})
+            values.setdefault('family', family)
+            def expand(text):
+                for _ in range(16):
+                    updated = re.sub(r'<([A-Za-z0-9_]+)>', lambda m: str(values.get(m[1], m[0])), text)
+                    if updated == text: return text
+                    text = updated
+                raise UpgradeError('Recursive runtime action property')
+            ban = expand(values.get('actionban', ''))
+            start = expand(values.get('actionstart', ''))
+            matches = re.findall(r'\bnft\s+add\s+element\s+(inet|ip|ip6)\s+([A-Za-z0-9_.:-]+)\s+([A-Za-z0-9_.:-]+)(?=\s)', ban)
+            if not matches: raise UpgradeError('Unresolved runtime nft action: ' + jail)
+            for table_family, table, name in matches:
+                if (table_family == 'ip' and version != 4) or (table_family == 'ip6' and version != 6):
+                    raise UpgradeError('Runtime action family mismatch: ' + jail)
+                lazy = ('nft add set ' + table_family + ' ' + table + ' ' + name in start and
+                        ('ipv4_addr' if version == 4 else 'ipv6_addr') in start)
+                reference = (version, table_family, table, name)
+                references[reference] = references.get(reference, False) or lazy
+    if {ref[0] for ref in references} != {4, 6}:
+        raise UpgradeError('Cannot resolve both runtime nft families: ' + jail)
+    return references
+
+
+def diagnostic_merge(ranges):
+    merged = []
+    for first, last in sorted(ranges):
+        if merged and first <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(last, merged[-1][1]))
+        else: merged.append((first, last))
+    return merged
+
+
+def diagnostic_ranges(elements, version):
+    ranges = []
+    for element in elements:
+        if isinstance(element, dict) and 'elem' in element:
+            element = element['elem']['val']
+        if isinstance(element, str):
+            first = last = ipaddress.ip_address(element)
+        elif isinstance(element, dict) and set(element) == {'prefix'}:
+            prefix = element['prefix']
+            network = ipaddress.ip_network(str(prefix['addr']) + '/' + str(prefix['len']), strict=False)
+            first, last = network.network_address, network.broadcast_address
+        elif isinstance(element, dict) and set(element) == {'range'}:
+            first, last = map(ipaddress.ip_address, element['range'])
+        else: raise UpgradeError('Unsupported nft address element; no repair attempted')
+        if first.version != version or last.version != version or int(first) > int(last):
+            raise UpgradeError('Invalid nft address family/range')
+        ranges.append((int(first), int(last)))
+    return diagnostic_merge(ranges)
+
+
+def diagnostic_nft():
+    result = subprocess.run(['nft', '-j', 'list', 'ruleset'], text=True, capture_output=True)
+    if result.returncode: raise UpgradeError('nft ruleset read failed')
+    try:
+        document = json.loads(result.stdout)
+        if not isinstance(document.get('nftables'), list): raise ValueError()
+        return document
+    except (ValueError, TypeError, AttributeError) as error:
+        raise UpgradeError('Malformed nft ruleset response') from error
+
+
+def diagnostic_compare(label, expected, actual):
+    if expected != actual:
+        count = lambda ranges: sum(last - first + 1 for first, last in ranges)
+        raise UpgradeError('Membership mismatch: ' + label + '; expected=' + str(count(expected)) +
+                           ', actual=' + str(count(actual)) + ' (equal counts do not prove equal members)')
+
+
 def diagnose_sync(docker=False):
-    """Strict active-profile checks; failed API reads never become zero bans."""
-    sync = load_sync()
-    bans = snapshot_bans()
-    verify_npm_coverage(bans, sync)
-    # Read the whole ruleset once: an absent lazy set differs from a failed read.
-    document = nft_json()
-    if not any(e.get('table', {}).get('family') == 'inet' and
-               e['table'].get('name') == 'fail2ban-filter' for e in document['nftables']):
-        raise UpgradeError('Managed firewall table missing')
-    present = {(e['set']['table'], e['set']['name']) for e in document['nftables']
-               if 'set' in e and e['set'].get('family') == 'inet'}
+    """Read-only active-jail membership; stale unreferenced sets are ignored."""
+    bans = diagnostic_bans()
+    document = diagnostic_nft()
+    sets = {}
+    tables = set()
+    for entry in document['nftables']:
+        if 'table' in entry:
+            table = entry['table']; tables.add((table['family'], table['name']))
+        if 'set' in entry:
+            item = entry['set']; key = (item['family'], item['table'], item['name'])
+            if key in sets: raise UpgradeError('Ambiguous nft set response')
+            sets[key] = item
+    expected_sets = {}
+    lazy_sets = {}
     for jail, addresses in bans.items():
-        if jail == 'recidive':
-            names = {4: 'f2b-recidive', 6: 'f2b-recidive-v6'}
+        for reference, lazy in diagnostic_action_sets(jail).items():
+            version, family, table, name = reference
+            expected_sets.setdefault(reference, set()).update(
+                x for x in addresses if ipaddress.ip_address(x).version == version)
+            lazy_sets[reference] = lazy_sets.get(reference, True) and lazy
+    for reference, addresses in expected_sets.items():
+        version, family, table, name = reference
+        if (family, table) not in tables: raise UpgradeError('Referenced runtime table missing')
+        item = sets.get((family, table, name))
+        expected = diagnostic_ranges(list(addresses), version)
+        if item is None:
+            if expected or not lazy_sets[reference]: raise UpgradeError('Referenced runtime set missing: ' + name)
+            actual = []
         else:
-            names = {v: value[0] for v, value in effective_nft_actions(jail).items()}
-        if set(names) != {4, 6}: raise UpgradeError('No two-family action: ' + jail)
-        for family, name in names.items():
-            expected = {x for x in addresses if ipaddress.ip_address(x).version == family}
-            if jail == 'recidive' and ('fail2ban-filter', name) not in present:
-                raise UpgradeError('Managed recidive set missing')
-            actual = (set(sync.readset('fail2ban-filter', name))
-                      if ('fail2ban-filter', name) in present else set())
-            if actual != expected: raise UpgradeError('Jail/set membership mismatch: ' + jail)
+            if item.get('type') != ('ipv4_addr' if version == 4 else 'ipv6_addr'):
+                raise UpgradeError('Referenced set has wrong address type: ' + name)
+            actual = diagnostic_ranges(item.get('elem', []), version)
+        diagnostic_compare(table + '/' + name, expected, actual)
     if docker:
-        for family in (4, 6):
-            expected = {x for values in bans.values() for x in values
-                        if ipaddress.ip_address(x).version == family}
-            if set(sync.readset('docker-block', 'docker-banned-ipv' + str(family))) != expected:
-                raise UpgradeError('Docker membership mismatch')
-    print('PASS: ' + str(len(bans)) + ' active jails synchronized (IPv4 + IPv6)')
+        for version in (4, 6):
+            name = 'docker-banned-ipv' + str(version)
+            item = sets.get(('inet', 'docker-block', name))
+            if item is None or item.get('type') != ('ipv4_addr' if version == 4 else 'ipv6_addr'):
+                raise UpgradeError('Docker family set missing/wrong type')
+            expected = diagnostic_ranges([x for ips in bans.values() for x in ips
+                                          if ipaddress.ip_address(x).version == version], version)
+            diagnostic_compare('docker-block/' + name, expected, diagnostic_ranges(item.get('elem', []), version))
+    if diagnostic_bans() != bans:
+        raise UpgradeError('Runtime bans changed during diagnostic; retry without forcing synchronization')
+    print('PASS: ' + str(len(bans)) + ' active jails; exact IPv4/IPv6 membership' +
+          (' and Docker union' if docker else '') + '; sets unused by loaded jail actions ignored; no changes made')
 
 def restore_bans(saved):
     live = set(parse_jails(run("fail2ban-client","status").stdout))
@@ -408,6 +543,9 @@ def main():
             print('PASS: runtime HTTP log coverage; active web jails: ' + str(len(set(jails) & HTTP_JAILS)))
             return 0
         if args.sync_check or args.docker_check:
+            # Keep the source workflow's separate HTTP-coverage guard. The
+            # standalone diagnostic hotfix intentionally checks membership only.
+            verify_npm_coverage(snapshot_bans())
             diagnose_sync(docker=args.docker_check)
             return 0
         if args.set_name:
