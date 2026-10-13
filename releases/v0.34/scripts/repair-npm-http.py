@@ -91,6 +91,8 @@ def preflight(directory):
     for file in (PROFILE, SWEEP, VERIFIER): secure(file)
     module = fresh.load_upgrade()
     verifier = module.load_verifier()
+    if verifier.validate_dbfile(fresh.run('fail2ban-client', 'get', 'dbfile').stdout) != '/var/lib/fail2ban/fail2ban.sqlite3':
+        raise fresh.FreshError('This scoped repair requires the standard SQLite database; review custom DB backup first')
     sync = verifier.load_sync()
     bans = verifier.snapshot_bans()
     affected = sorted(set(bans) & verifier.HTTP_JAILS)

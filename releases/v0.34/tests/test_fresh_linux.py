@@ -176,6 +176,18 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         original_targets = {file: file.read_bytes() for file in (repair.PROFILE, repair.SWEEP, repair.VERIFIER)}
         plan = repair.preflight(logs)
         assert all(file.read_bytes() == value for file, value in original_targets.items()), 'Preflight modified targets'
+        override = Path('/etc/fail2ban/jail.d/zzz-synthetic-coverage.local')
+        override.write_text('[f2b-exploit-critical]\nlogpath = ' + str(logs / 'fallback_error.log') + '\n')
+        try: repair.preflight(logs)
+        except repair.fresh.FreshError as error: assert 'coverage' in str(error)
+        else: raise AssertionError('Suppressing local log override must be refused')
+        finally: override.unlink()
+        original_sweep = repair.SWEEP.read_bytes()
+        repair.SWEEP.write_bytes(original_sweep + b'# unrecognized managed edit\n')
+        try: repair.preflight(logs)
+        except repair.fresh.FreshError as error: assert 'Unknown managed target' in str(error)
+        else: raise AssertionError('Unknown managed filter modification must be refused')
+        finally: repair.SWEEP.write_bytes(original_sweep)
         original_command = repair.fresh.run
         injected = [False]
         def fail_once(*parts, **kwargs):
