@@ -123,10 +123,15 @@ def preflight(directory):
     if {c[1] for c in commands(before_dump) if c[0] == 'add'} != set(bans):
         raise fresh.FreshError('Disk/runtime active profile mismatch; refuse unrelated changes')
     # The loaded filters must match disk before any reload is authorized.
+    from fail2ban.server.failregex import FailRegex, Regex
     for jail in affected:
+        dns = sync.call(['get', jail, 'usedns'])
         for key in ('failregex', 'ignoreregex'):
-            if sync.call(['get', jail, key]) != expression_list(before_dump, jail, key):
-                raise fresh.FreshError('Loaded filter/disk mismatch; review pending edits first')
+            compiler = FailRegex if key == 'failregex' else Regex
+            expected = [compiler(value, useDns=dns).getRegex()
+                        for value in expression_list(before_dump, jail, key)]
+            if sync.call(['get', jail, key]) != expected:
+                raise fresh.FreshError('Loaded filter/disk mismatch: ' + jail + '/' + key + '; review pending edits first')
     whitelist = {j: fresh.run('fail2ban-client', 'get', j, 'ignoreip').stdout for j in bans}
     before_inventory = inventory()
     with tempfile.TemporaryDirectory(prefix='f2b-npm-candidate-') as folder:
