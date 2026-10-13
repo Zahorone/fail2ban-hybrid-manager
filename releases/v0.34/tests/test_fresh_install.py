@@ -92,6 +92,19 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-unit-') as temporary:
     assert 'f2b-webshell-sweep' in enabled and 'nginx-php-errors' not in enabled
     assert 'tail' in profile['f2b-webshell-sweep']['logpath']
     assert not (logs / 'fallback_error.log').exists()
+    (logs / 'fallback_http_access.log').touch()
+    (logs / 'fallback_http_error.log').touch()
+    (logs / 'fallback_stream_access.log').touch()
+    (logs / 'backend.log').touch()
+    profile, enabled, _ = m.policy(args(npm_log_dir=logs))
+    assert 'f2b-exploit-critical' in enabled and 'f2b-web-medium' in enabled
+    paths = profile['f2b-exploit-critical']['logpath']
+    assert 'fallback_http_access.log' in paths and 'fallback_http_error.log' in paths
+    assert 'stream' not in paths and 'backend' not in paths
+    (logs / 'proxy-host-1_access.log').unlink()
+    (logs / 'fallback_http_access.log').unlink()
+    profile, enabled, _ = m.policy(args(npm_log_dir=logs))
+    assert 'f2b-exploit-critical' not in enabled, 'Error-only must not enable critical'
     with patch.object(m, 'ROOT', root):
         for name, data in (('/etc/os-release', 'ID=ubuntu\nVERSION_ID="26.04"\n'), ('/proc/1/comm', 'systemd\n'), ('/etc/nftables.conf', STOCK)):
             target = m.path(name); target.parent.mkdir(parents=True, exist_ok=True); target.write_text(data)

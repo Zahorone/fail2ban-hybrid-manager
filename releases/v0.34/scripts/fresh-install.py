@@ -189,6 +189,7 @@ def policy(args):
             raise FreshError('Invalid --mail-to address')
         output['DEFAULT'] = {'destemail': args.mail_to, 'sender': 'fail2ban@localhost', 'mta': 'sendmail'}
     enabled, disabled = [], []
+    verifier = load_upgrade().load_verifier()
     for jail in parser.sections():
         fields = {'enabled': 'false'}
         if jail in {'manualblock', 'recidive'}:
@@ -200,14 +201,10 @@ def policy(args):
             directory = str(args.npm_log_dir)
             if not re.fullmatch(r'/[A-Za-z0-9_./\-]+', directory):
                 raise FreshError('NPM log directory must be an absolute simple path')
-            matches = []
-            for line in parser[jail]['logpath'].splitlines():
-                parts = line.split()
-                pattern = parts[0].replace('/opt/rustnpm/data/logs', directory)
-                for file in Path(pattern).parent.glob(Path(pattern).name):
-                    if file.is_file():
-                        matches.append(str(file) + (' tail' if len(parts) > 1 and parts[1] == 'tail' else ''))
-            if matches:
+            logs = verifier.npm_logs(directory)
+            required = verifier.npm_required(jail)
+            matches = [file + ' tail' for kind in sorted(required) for file in logs[kind]]
+            if all(logs[kind] for kind in required):
                 fields.update(enabled='true', logpath='\n'.join(sorted(set(matches))))
         if not args.mail_to:
             fields['action'] = ('nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", '
@@ -307,6 +304,7 @@ def install(args, before, selected):
         run('systemctl', 'enable', '--now', 'cron')
         run('systemctl', 'enable', '--now', 'fail2ban')
         wait_ready(selected[1])
+        run('/usr/bin/python3', '/usr/local/libexec/f2b-runtime-verify.py', '--npm-coverage')
         run('/usr/bin/python3', '/usr/local/sbin/f2b-ipv6-sync.py')
         run('/usr/bin/python3', '/usr/local/sbin/f2b-save-owned-tables.py')
         actual = run('fail2ban-client', 'status').stdout

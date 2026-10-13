@@ -24,6 +24,14 @@ establish Docker/NPM installation, external IPv6 reachability, actual packet
 drops, all profiles, or upgrade/canary success. Preserve the core VM evidence;
 use a separate pre-manager VM for the [Docker/NPM lab](DOCKER-NPM-LAB.md).
 
+Subsequent operator testing at `393abab` reported fresh Docker/NPM-profile
+installation with five jails, HTTP 200, and real client HTTP blocked/restored by
+manual IPv4/IPv6 ban/unban. Enabling IPv6 on the Compose bridge preserved the
+real client IPv6 in access logs. Automatic testing then exposed missing critical
+HTTP access coverage; a direct `/.env` request was also not a canonical critical
+IOC. **Automatic detection is not validated** by those manual enforcement results.
+See the [scoped HTTP repair](NPM-HTTP-REPAIR.md), not a new fresh install.
+
 ## Automated fixture evidence
 
 The regression suite covers Fail2Ban's comma-separated action format, one

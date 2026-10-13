@@ -1,0 +1,4 @@
+[13/Oct/2026:10:00:00 +0000] 404 - GET http test.example "/tenant/a/wp-admin/admin-ajax.php" [Client 192.0.2.17] [Length 153] [Gzip -] "curl" "-"
+[13/Oct/2026:10:00:00 +0000] 404 - GET http test.example "/tenant/a/wp-cron.php" [Client 2001:db8::17] [Length 153] [Gzip -] "curl" "-"
+[13/Oct/2026:10:00:00 +0000] - 404 200 - GET http test.example "/lab-missing-two.php" [Client 192.0.2.17] [Length 153] [Gzip -] [Sent-to backend] "curl" "-"
+[13/Oct/2026:10:00:00 +0000] 200 - GET http test.example "/news" [Client 2001:db8::17] [Length 153] [Gzip -] "curl" "/lab-missing-two.php"

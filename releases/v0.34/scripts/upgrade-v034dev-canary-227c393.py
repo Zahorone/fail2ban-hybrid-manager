@@ -9,8 +9,48 @@ RELEASE = "0.34-dev"
 TARGET_CHANGESET = "227c393"
 BACKUP_LABEL = "v034dev-to-227c393"
 JAIL = "f2b-webshell-sweep"
+HTTP_JAILS = {'f2b-exploit-critical', 'f2b-webshell-sweep', 'f2b-dos-high',
+              'f2b-web-medium', 'nginx-recon-bonus', 'f2b-fuzzing-payloads',
+              'f2b-botnet-signatures', 'nginx-php-errors', 'f2b-anomaly-detection'}
 
 class UpgradeError(RuntimeError): pass
+
+def npm_log_kind(name):
+    """Known HTTP logs only: never streams, backend logs or rotations."""
+    match = re.fullmatch(r'(?:fallback(?:_http)?|dead-host|(?:proxy|redirection|dead)-host-[0-9]+)_(access|error)\.log', name)
+    return match[1] if match else None
+
+def npm_logs(directory):
+    result = {'access': [], 'error': []}
+    for file in sorted(Path(directory).glob('*.log')):
+        kind = npm_log_kind(file.name)
+        if kind and file.is_file() and not file.is_symlink(): result[kind].append(str(file))
+    return result
+
+def npm_required(jail):
+    if jail == 'f2b-exploit-critical': return {'access', 'error'}
+    return {'error'} if jail == 'nginx-php-errors' else {'access'}
+
+def load_sync():
+    script = Path('/usr/local/sbin/f2b-ipv6-sync.py')
+    if not script.is_file(): script = package_root() / 'scripts/f2b-ipv6-sync.py'
+    spec = importlib.util.spec_from_file_location('diagnostic_sync', script)
+    sync = importlib.util.module_from_spec(spec); spec.loader.exec_module(sync)
+    return sync
+
+def verify_npm_coverage(jails, sync=None):
+    selected = set(jails) & HTTP_JAILS
+    if not selected: return
+    sync = sync or load_sync()
+    for jail in sorted(selected):
+        files = sync.call(['get', jail, 'logpath'])
+        if not isinstance(files, list) or not files or not all(isinstance(f, str) for f in files):
+            raise UpgradeError('Invalid runtime log paths: ' + jail)
+        kinds = {npm_log_kind(Path(f).name) for f in files}
+        if None in kinds or not npm_required(jail) <= kinds:
+            raise UpgradeError('Incomplete HTTP access/error coverage: ' + jail)
+        if any(not Path(f).is_file() or Path(f).is_symlink() for f in files):
+            raise UpgradeError('Missing/unsafe runtime HTTP log: ' + jail)
 
 def run(*args, check=True):
     result = subprocess.run(args, text=True, capture_output=True)
@@ -91,11 +131,9 @@ def snapshot_bans():
 
 def diagnose_sync(docker=False):
     """Strict active-profile checks; failed API reads never become zero bans."""
-    sync_path = Path('/usr/local/sbin/f2b-ipv6-sync.py')
-    if not sync_path.is_file(): sync_path = package_root() / 'scripts/f2b-ipv6-sync.py'
-    spec = importlib.util.spec_from_file_location('diagnostic_sync', sync_path)
-    sync = importlib.util.module_from_spec(spec); spec.loader.exec_module(sync)
+    sync = load_sync()
     bans = snapshot_bans()
+    verify_npm_coverage(bans, sync)
     # Read the whole ruleset once: an absent lazy set differs from a failed read.
     document = nft_json()
     if not any(e.get('table', {}).get('family') == 'inet' and
@@ -358,11 +396,17 @@ def main():
     mode.add_argument("--set-name",nargs=2,metavar=("JAIL","FAMILY"),help="resolve the effective nft set for wrapper diagnostics")
     mode.add_argument("--sync-check", action="store_true", help="strict read-only active-profile sync check")
     mode.add_argument("--docker-check", action="store_true", help="strict read-only active-profile and Docker union check")
+    mode.add_argument("--npm-coverage", action="store_true", help="read-only HTTP access/error coverage for active web jails")
     parser.add_argument("--backup-dir",type=Path,default=Path("/var/backups/f2b-v034-canary"))
     parser.add_argument("--fixture-root",type=Path,help=argparse.SUPPRESS); args=parser.parse_args()
     root=package_root(); fixture=args.fixture_root is not None; system_root=args.fixture_root.resolve() if fixture else Path("/")
     mapping=install_map(root,system_root)
     try:
+        if args.npm_coverage:
+            jails = snapshot_bans()
+            verify_npm_coverage(jails)
+            print('PASS: runtime HTTP log coverage; active web jails: ' + str(len(set(jails) & HTTP_JAILS)))
+            return 0
         if args.sync_check or args.docker_check:
             diagnose_sync(docker=args.docker_check)
             return 0

@@ -83,7 +83,7 @@ assert "99-exploit-critical-rce.local" in installer
 
 sweep_filter = (ROOT / "filters/f2b-webshell-sweep.conf").read_text()
 sweep_jail = (ROOT / "config/webshell-sweep.local").read_text()
-assert " - 404 " in sweep_filter
+assert "404 - (?:GET|HEAD)" in sweep_filter
 assert "(?:GET|HEAD)" in sweep_filter
 assert "POST" not in sweep_filter.split("failregex =", 1)[1].split("ignoreregex =", 1)[0]
 assert "maxretry = 3" in sweep_jail
