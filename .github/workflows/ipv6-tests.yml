@@ -34,6 +34,10 @@ jobs:
         run: /usr/bin/python3 releases/v0.34/tests/test_wrapper.py
       - name: Strict active-profile runtime diagnostics
         run: /usr/bin/python3 releases/v0.34/tests/test_runtime_diagnostics.py
+      - name: Port persistence and known corruption contracts
+        run: /usr/bin/python3 releases/v0.34/tests/test_port_persistence.py
+      - name: Transactional ports and persistence load in private namespaces
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_port_persistence.py --net
       - name: Reporting scope tests
         run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
       - name: Upgrade transaction unit tests
