@@ -69,12 +69,26 @@ For the current development snapshot, these commands need no commit placeholder.
 Record the printed commit and review it before applying; `main` is a moving
 development branch, not an immutable final release.
 
+On a minimal Debian/Ubuntu VM, install the download prerequisites **before**
+cloning. `git` and `ca-certificates` provide HTTPS source download; `python3`
+bootstraps the local preflight. The `&&` chain stops on any failure, so a failed
+clone cannot run later commands from the wrong directory.
+
 ```sh
-git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git
-cd fail2ban-hybrid-manager
-git switch --detach origin/main
+sudo apt-get update &&
+sudo apt-get install -y git ca-certificates python3 &&
+command -v git &&
+git --version &&
+git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git &&
+cd fail2ban-hybrid-manager &&
+git switch --detach origin/main &&
 git rev-parse HEAD
 ```
+
+Do not continue to installation unless this chain succeeds. Download prerequisites
+are separate from the installer's runtime package checks; Git is not required by
+fresh installation from an already extracted source tree. See the
+[no-Git source archive alternative](releases/v0.34/docs/FRESH-INSTALL.md#download-without-git).
 
 ### 🧪 Clean install — disposable host only
 

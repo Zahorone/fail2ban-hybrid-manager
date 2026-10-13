@@ -13,6 +13,12 @@ the exact selected active jail list, with a 60-second deadline. The VM trial did
 not validate a completed fresh install or reboot. Do not rerun the fresh installer
 over an `incomplete` marker, and do not delete configuration/database to bypass it.
 
+Follow-up user-reported VM testing confirmed recovery and reboot with the two
+core jails: documentation-only IPv4/IPv6 manual bans survived reboot, and unban
+removed both addresses from the jail and all four relevant nft sets. This is
+recovery/reboot evidence, **not** a clean installation without recovery or an
+external packet-drop test. A second genuinely clean VM trial is still pending.
+
 For that specific partial **core-only** transaction, use the separate root-only
 `scripts/recover-fresh.py` from the reviewed fix. Keep the repository Git history
 available (`git fetch origin`); recovery derives generic target fingerprints from
@@ -52,13 +58,15 @@ of successful boot persistence; test reboot separately on the disposable VM.
 Run in a fresh booted VM with console access, not on an existing managed host:
 
 ```sh
-sudo apt-get update
-sudo apt-get install -y git python3
-git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git
-cd fail2ban-hybrid-manager
-git switch --detach origin/main
-git rev-parse HEAD
-cd releases/v0.34
+sudo apt-get update &&
+sudo apt-get install -y git ca-certificates python3 &&
+command -v git &&
+git --version &&
+git clone https://github.com/Zahorone/fail2ban-hybrid-manager.git &&
+cd fail2ban-hybrid-manager &&
+git switch --detach origin/main &&
+git rev-parse HEAD &&
+cd releases/v0.34 &&
 sudo bash INSTALL-ALL-v034.sh --check
 ```
 
@@ -77,10 +85,43 @@ release. No placeholder commit hash is required in these commands. Do not add
 `--check` to mutating flag combinations. Defaults enable only `recidive` and
 `manualblock`, not SSH/web protection or a claimed fixed 13 active jails.
 
+## Download without Git
+
+Download dependencies are needed before the installer can even be obtained.
+For Git download these are `git` and `ca-certificates`; `python3` is the minimal
+local preflight bootstrap. Install them explicitly as above. The installer cannot
+diagnose a missing Git executable when it has not yet been downloaded.
+
+An already extracted source tree does not need Git for fresh installation.
+Alternatively, obtain a source archive of the reviewed readiness-fix commit:
+
+```sh
+sudo apt-get update &&
+sudo apt-get install -y ca-certificates curl tar gzip python3 &&
+F2B_SOURCE_DIR="$(mktemp -d)" &&
+curl --fail --location \
+  https://github.com/Zahorone/fail2ban-hybrid-manager/archive/393abab6c0285826c56f2e39b07608288c21318a.tar.gz \
+  --output "$F2B_SOURCE_DIR/source.tar.gz" &&
+tar -xzf "$F2B_SOURCE_DIR/source.tar.gz" -C "$F2B_SOURCE_DIR" --strip-components=1 &&
+cd "$F2B_SOURCE_DIR/releases/v0.34" &&
+sudo bash INSTALL-ALL-v034.sh --check
+```
+
+This uses a new temporary directory and stops on download/extraction failure.
+Review the pinned source before apply; HTTPS transport is not an independent
+signature/checksum verification. Do not pipe downloads into a privileged shell.
+The existing **v0.34-dev release asset is upgrade-only**, not a fresh-install
+bundle; do not substitute it for this source archive. Legacy partial-install
+recovery is a separate workflow that requires repository Git history.
+
+Runtime prerequisites are checked only once the local installer is available.
+Git, curl and download certificates are not added to its runtime dependency list.
+
 ## Dependencies and optional profiles
 
 Core packages: `nftables fail2ban python3 cron iproute2 util-linux sudo acl attr
-tar gzip coreutils grep sed gawk`. Git is needed only to clone the source.
+tar gzip coreutils grep sed gawk`. Git is needed only to clone the source
+(or for the separate legacy recovery workflow), not for fresh installation.
 The checker verifies installed dpkg status, required commands, Bash 4+, the
 distribution Fail2Ban Python module, systemd PID 1 and supported OS/architecture.
 Missing Python bootstrap is diagnosed before calling Python. Package installation
