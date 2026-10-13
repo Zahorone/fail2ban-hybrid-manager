@@ -17,7 +17,12 @@ Follow-up user-reported VM testing confirmed recovery and reboot with the two
 core jails: documentation-only IPv4/IPv6 manual bans survived reboot, and unban
 removed both addresses from the jail and all four relevant nft sets. This is
 recovery/reboot evidence, **not** a clean installation without recovery or an
-external packet-drop test. A second genuinely clean VM trial is still pending.
+external packet-drop test. A second genuinely clean Ubuntu 26.04 ARM64 VM trial
+at `393abab` subsequently completed core installation **without recovery**,
+reported two active jails and a complete marker, then after reboot reported
+Fail2Ban/nftables/cron active and both-family synchronization PASS. These are
+user-reported core-profile results, not Docker/NPM or external IPv6 enforcement
+validation. See [validation scope](CANARY-VALIDATION.md).
 
 For that specific partial **core-only** transaction, use the separate root-only
 `scripts/recover-fresh.py` from the reviewed fix. Keep the repository Git history
@@ -178,6 +183,11 @@ There is no automatic fresh-install rollback guarantee. Existing/incomplete
 state is refused on rerun rather than cleaned or rebuilt, preserving bans/rules.
 The transactional upgrade/rollback workflow is separate; do not use it to blindly
 adopt an incomplete fresh install or to change a selected profile.
+
+To test Docker/NPM after a successful core test, preserve that VM snapshot and
+use a **different pre-manager VM** with Docker/NPM already serving real traffic.
+There is no supported fresh-rerun profile-add operation. Follow the separate
+[Docker/NPM lab and packet-test recipe](DOCKER-NPM-LAB.md).
 
 ## Validation limits
 
