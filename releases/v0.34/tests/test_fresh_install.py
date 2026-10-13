@@ -158,3 +158,40 @@ with patch.object(m, 'run', return_value=subprocess.CompletedProcess([], 255, ''
 with patch.object(m, 'run', side_effect=subprocess.TimeoutExpired('client', 0.01)):
     refused(m.wait_ready, ['manualblock'], 0.01)
 print('PASS: bounded readiness tolerates delayed socket and waits for exact selected profile')
+
+# Execute the actual documented bootstrap chains with harmless shell stubs.
+# Failure before download/clone must not cd or run an installer elsewhere.
+repo = Path(__file__).resolve().parents[3]
+for document in (repo / 'README.md', m.SOURCE / 'docs/FRESH-INSTALL.md'):
+    blocks = re.findall(r'```sh\n(.*?)```', document.read_text(), re.S)
+    bootstrap = next(block for block in blocks if 'git clone ' in block)
+    assert 'git ca-certificates python3' in bootstrap
+    assert bootstrap.index('apt-get install') < bootstrap.index('git clone')
+    subprocess.run(['sh', '-n'], input=bootstrap, text=True, check=True)
+    stubs = r'''
+sudo() {
+ printf 'sudo:%s\n' "$*"
+ if [ "$FAIL_PHASE" = apt ] && [ "$*" = 'apt-get update' ]; then return 41; fi
+}
+git() {
+ printf 'git:%s\n' "$*"
+ if [ "$FAIL_PHASE" = clone ] && [ "$1" = clone ]; then return 42; fi
+}
+cd() { printf 'cd:%s\n' "$*"; }
+'''
+    for phase, code in (('apt', 41), ('clone', 42), ('success', 0)):
+        result = subprocess.run(['sh', '-c', 'FAIL_PHASE=' + phase + '\n' + stubs + bootstrap],
+                                text=True, capture_output=True)
+        assert result.returncode == code, result.stderr
+        if phase != 'success':
+            assert 'cd:' not in result.stdout
+            assert 'git:switch' not in result.stdout
+            assert 'INSTALL-ALL' not in result.stdout
+        if phase == 'apt': assert 'git:clone' not in result.stdout
+    archive = next((block for block in blocks if 'curl --fail --location' in block), None)
+    if archive:
+        subprocess.run(['sh', '-n'], input=archive, text=True, check=True)
+        assert 'git ' not in archive and '| sudo' not in archive
+assert 'git' not in m.CORE and 'git' not in m.COMMANDS
+assert 'git' not in m.packages(args())
+print('PASS: documented download bootstrap stops on apt/clone failure; fresh runtime does not require Git')
