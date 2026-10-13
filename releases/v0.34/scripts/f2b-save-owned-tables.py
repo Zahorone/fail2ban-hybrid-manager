@@ -148,7 +148,8 @@ def commit(contents):
         changed = []
         try:
             for target, data in contents.items():
-                atomic(target, data); changed.append(target)
+                # Track before replace: fsync can fail after rename succeeded.
+                changed.append(target); atomic(target, data)
             validate_global({})
         except Exception:
             for target in reversed(changed): atomic(target, original[target])
