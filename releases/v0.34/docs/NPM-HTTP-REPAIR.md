@@ -71,7 +71,8 @@ Use a dedicated disposable test client, separate from management. Establish a
 successful HTTP baseline first. For one reachable family, from that client:
 
 ```sh
-read -r -p 'Disposable VM IPv4 address: ' F2B_SERVER4
+printf 'Disposable VM IPv4 address: '
+IFS= read -r F2B_SERVER4
 curl -4 --noproxy '*' --connect-timeout 3 --max-time 5 \
   "http://$F2B_SERVER4:8088/this_is_a_new_hello_world.php?f2b-lab=1"
 ```
@@ -79,7 +80,8 @@ curl -4 --noproxy '*' --connect-timeout 3 --max-time 5 \
 Or, separately for IPv6 with an already verified reachable baseline:
 
 ```sh
-read -r -p 'Disposable VM IPv6 address: ' F2B_SERVER6
+printf 'Disposable VM IPv6 address: '
+IFS= read -r F2B_SERVER6
 curl -6 --noproxy '*' --connect-timeout 3 --max-time 5 \
   "http://[$F2B_SERVER6]:8088/this_is_a_new_hello_world.php?f2b-lab=1"
 ```
