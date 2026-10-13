@@ -96,11 +96,15 @@ def ports(document=None):
         document = json.loads(run('nft', '-n', '-j', 'list', 'set', 'inet', 'docker-block', SET))
     found = [e['set'] for e in document['nftables'] if 'set' in e and
              e['set'].get('table') == 'docker-block' and e['set'].get('name') == SET]
-    if len(found) != 1 or found[0].get('type') != 'inet_service' or 'timeout' in found[0].get('flags', []):
+    if (len(found) != 1 or found[0].get('type') != 'inet_service' or
+            set(found[0].get('flags', [])) - {'interval'} or found[0].get('timeout')):
         raise PersistenceError('Unexpected blocked-port set schema')
     result = set()
     for element in found[0].get('elem', []):
-        if isinstance(element, dict) and 'elem' in element: element = element['elem']['val']
+        if isinstance(element, dict) and 'elem' in element:
+            if set(element['elem']) != {'val'}:
+                raise PersistenceError('Custom port element metadata requires review; preserving runtime')
+            element = element['elem']['val']
         if isinstance(element, int): start = end = element
         elif isinstance(element, dict) and set(element) == {'range'}: start, end = element['range']
         else: raise PersistenceError('Unsupported port element; preserving runtime')

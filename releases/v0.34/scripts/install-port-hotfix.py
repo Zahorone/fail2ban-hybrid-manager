@@ -34,7 +34,7 @@ def plan():
     if Path('/tmp/f2b-wrapper.lock').exists():
         raise m.PersistenceError('Legacy wrapper operation may be active; inspect it, do not blindly remove its lock')
     m.secure(WRAPPER)
-    installed = WRAPPER.read_text()
+    installed = WRAPPER.read_bytes().decode('utf-8')
     canonical = (SOURCE / 'scripts/f2b-wrapper-v034.sh').read_text()
     old = [legacy('releases/v0.34/scripts/f2b-wrapper-v034.sh'),
            (SOURCE.parent / 'v0.33/scripts/f2b-wrapper-v033.sh').read_text()]

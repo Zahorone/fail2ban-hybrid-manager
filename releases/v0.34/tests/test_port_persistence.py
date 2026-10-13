@@ -54,23 +54,52 @@ with tempfile.TemporaryDirectory(prefix='f2b-ports-linux-') as temporary:
     Path('/run/lock').mkdir()
     m.DIRECTORY.mkdir(exist_ok=True)
     filter_text = '''table inet fail2ban-filter {
- set banned4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h }; }
- set banned6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h }; }
- chain input { type filter hook input priority -10; policy accept; ip saddr @banned4 drop; ip6 saddr @banned6 drop; }
+ set banned4 {
+  type ipv4_addr
+  flags timeout
+  elements = { 192.0.2.17 timeout 1h }
+ }
+ set banned6 {
+  type ipv6_addr
+  flags timeout
+  elements = { 2001:db8::17 timeout 1h }
+ }
+ chain input {
+  type filter hook input priority -10; policy accept;
+  ip saddr @banned4 drop
+  ip6 saddr @banned6 drop
+ }
 }
 '''
     def docker_text(body):
         return '''table inet docker-block {
- set docker-blocked-ports { type inet_service; flags interval; auto-merge;
+ set docker-blocked-ports {
+  type inet_service
+  flags interval
+  auto-merge
 ''' + body + '''
  }
- set docker-banned-ipv4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h }; }
- set docker-banned-ipv6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h }; }
- chain prerouting { type filter hook prerouting priority -110; policy accept; ip saddr @docker-banned-ipv4 drop; ip6 saddr @docker-banned-ipv6 drop; tcp dport @docker-blocked-ports drop; }
+ set docker-banned-ipv4 {
+  type ipv4_addr
+  flags timeout
+  elements = { 192.0.2.17 timeout 1h }
+ }
+ set docker-banned-ipv6 {
+  type ipv6_addr
+  flags timeout
+  elements = { 2001:db8::17 timeout 1h }
+ }
+ chain prerouting {
+  type filter hook prerouting priority -110; policy accept;
+  ip saddr @docker-banned-ipv4 drop
+  ip6 saddr @docker-banned-ipv6 drop
+  tcp dport @docker-blocked-ports drop
+ }
 }
 '''
     foreign = Path('/etc/synthetic-foreign.nft')
-    foreign.write_text('table ip synthetic_foreign { chain guard { counter drop; } }\n')
+    foreign_text = 'table ip synthetic_foreign {\n chain guard {\n counter drop\n }\n}\n'
+    foreign.write_text(foreign_text)
     m.CONFIG.write_text('include "/etc/synthetic-foreign.nft"\ninclude "/etc/nftables.d/fail2ban-filter.nft"\ninclude "/etc/nftables.d/docker-block.nft"\n')
     filter_file = m.DIRECTORY / 'fail2ban-filter.nft'
     target = m.DIRECTORY / 'docker-block.nft'
@@ -89,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-ports-linux-') as temporary:
         m.change_port('10000', False)
         assert m.ports() == original_ports
         assert m.ports(m.validate_global({})) == original_ports
-        assert foreign.read_text() == 'table ip synthetic_foreign { chain guard { counter drop; } }\n'
+        assert foreign.read_text() == foreign_text
         files_before = {f: f.read_bytes() for f in (filter_file, target)}
         original_atomic = m.atomic; failed = [False]
         def fail_once(file, data):
