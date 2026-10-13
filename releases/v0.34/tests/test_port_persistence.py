@@ -54,8 +54,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-ports-linux-') as temporary:
     Path('/run/lock').mkdir()
     m.DIRECTORY.mkdir(exist_ok=True)
     filter_text = '''table inet fail2ban-filter {
- set banned4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h } }
- set banned6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h } }
+ set banned4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h }; }
+ set banned6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h }; }
  chain input { type filter hook input priority -10; policy accept; ip saddr @banned4 drop; ip6 saddr @banned6 drop; }
 }
 '''
@@ -64,8 +64,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-ports-linux-') as temporary:
  set docker-blocked-ports { type inet_service; flags interval; auto-merge;
 ''' + body + '''
  }
- set docker-banned-ipv4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h } }
- set docker-banned-ipv6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h } }
+ set docker-banned-ipv4 { type ipv4_addr; flags timeout; elements = { 192.0.2.17 timeout 1h }; }
+ set docker-banned-ipv6 { type ipv6_addr; flags timeout; elements = { 2001:db8::17 timeout 1h }; }
  chain prerouting { type filter hook prerouting priority -110; policy accept; ip saddr @docker-banned-ipv4 drop; ip6 saddr @docker-banned-ipv6 drop; tcp dport @docker-blocked-ports drop; }
 }
 '''
