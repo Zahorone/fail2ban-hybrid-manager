@@ -1,0 +1,12 @@
+{
+  "services": {
+    "npm": {
+      "ports": [
+        {"target": 80, "published": "8088", "host_ip": "${F2B_LAB_BIND6:?Set the isolated VM reachable IPv6 address}", "protocol": "tcp"}
+      ]
+    }
+  },
+  "networks": {
+    "default": {"enable_ipv6": true}
+  }
+}

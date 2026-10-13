@@ -1,0 +1,23 @@
+{
+  "name": "f2b-npm-lab",
+  "services": {
+    "npm": {
+      "image": "jc21/nginx-proxy-manager:2.16.0@sha256:4393e642e233e5efd5adeb7f10918d4aaea71c9ed875b94190273fc8e87f9594",
+      "platform": "linux/arm64",
+      "restart": "unless-stopped",
+      "ports": [
+        {"target": 81, "published": "81", "host_ip": "127.0.0.1", "protocol": "tcp"},
+        {"target": 80, "published": "8088", "host_ip": "${F2B_LAB_BIND4:?Set the isolated VM IPv4 address}", "protocol": "tcp"}
+      ],
+      "volumes": [
+        "/opt/f2b-npm-lab/data:/data",
+        "/opt/f2b-npm-lab/letsencrypt:/etc/letsencrypt"
+      ]
+    },
+    "backend": {
+      "image": "nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",
+      "platform": "linux/arm64",
+      "restart": "unless-stopped"
+    }
+  }
+}

@@ -93,7 +93,8 @@ fresh installation from an already extracted source tree. See the
 ### 🧪 Clean install — disposable host only
 
 Use a fresh booted systemd Debian/Ubuntu amd64/arm64 test host. Ubuntu 26.04 ARM64
-is detected, not yet VM/reboot-certified. The default command checks prerequisites
+has user-reported core clean-install and reboot success; Docker/NPM and external
+IPv4/IPv6 packet-drop validation remain pending. The default command checks prerequisites
 without changing the host. Shipped whitelists contain loopback only.
 
 ```sh
@@ -124,7 +125,9 @@ selects mail dependencies/actions; configure/test the MTA separately. Do not cop
 these optional placeholder paths/addresses literally. Keep profile values private.
 
 See [fresh-install safety and dependencies](releases/v0.34/docs/FRESH-INSTALL.md).
-Cleanup flags are unsupported. Full clean-install/reboot validation is still required.
+Cleanup flags are unsupported. Broader profile/upgrade validation is still required.
+For a separate pre-manager VM, see the [Docker/NPM lab](releases/v0.34/docs/DOCKER-NPM-LAB.md).
+Do not rerun fresh install to add profiles to a complete core installation.
 
 ### 🔄 Existing v0.33 / v0.34-dev — staged upgrade package
 
