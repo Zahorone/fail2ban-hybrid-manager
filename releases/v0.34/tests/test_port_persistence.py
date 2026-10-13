@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('ports', ROOT / 'scripts/f2b-save-owned-tables.py')
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-parser = argparse.ArgumentParser(); parser.add_argument('--net', action='store_true'); args = parser.parse_args()
+parser = argparse.ArgumentParser(); parser.add_argument('--net', dest='network_test', action='store_true'); args = parser.parse_args()
 
 
 def refused(call):
@@ -38,7 +38,7 @@ for name in ('manage_block_port', 'manage_unblock_port'):
     assert 'sed ' not in function and 'f2b-save-owned-tables.py' in function
     assert '|| return $?' in function
 
-if not args.net:
+if not args.network_test:
     print('PASS: known brace corruption recognition, refusal and wrapper error propagation contracts')
     raise SystemExit(0)
 assert os.geteuid() == 0
