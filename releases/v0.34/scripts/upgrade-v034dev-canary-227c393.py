@@ -77,12 +77,15 @@ def install_map(root, system_root=Path("/")):
            "jail": "etc/fail2ban/jail.d/99-webshell-sweep.local", "wrapper": "usr/local/bin/f2b",
            "sync": "usr/local/sbin/f2b-ipv6-sync.py", "hook": "usr/local/sbin/f2b-docker-hook"}
     mapping={system_root/path: src[name] for name, path in dst.items()}
+    # A new wrapper's report/version routes require this compatible helper first.
+    mapping = {system_root/'usr/local/libexec/f2b-report-filter.py':
+               Path(__file__).with_name('f2b-report-filter.py'), **mapping}
     mapping[system_root/"usr/local/libexec/f2b-runtime-verify.py"]=Path(__file__).resolve()
     return mapping
 
 def validate_payload(root):
     src = sources(root)
-    missing = [str(p) for p in src.values() if not p.is_file()]
+    missing = [str(p) for p in install_map(root).values() if not p.is_file()]
     if missing: raise UpgradeError("Missing payload: " + ", ".join(missing))
     if "/this_is_a_new_hello_world\\.php" not in src["critical"].read_text():
         raise UpgradeError("Missing hello-world IOC")
@@ -344,7 +347,7 @@ def production_preflight(root):
 def backup_paths(root):
     return [root/"etc/fail2ban",root/"var/lib/fail2ban",root/"usr/local/bin/f2b",
             root/"usr/local/sbin/f2b-docker-hook",root/"usr/local/sbin/f2b-ipv6-sync.py",
-            root/"usr/local/libexec/f2b-runtime-verify.py"]
+            root/"usr/local/libexec/f2b-runtime-verify.py", root/"usr/local/libexec/f2b-report-filter.py"]
 
 def create_backup(base,root,bans,nft):
     out=base/f"{BACKUP_LABEL}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"; out.mkdir(parents=True,mode=0o700)

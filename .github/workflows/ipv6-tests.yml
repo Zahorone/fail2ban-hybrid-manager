@@ -40,6 +40,8 @@ jobs:
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_port_persistence.py --net
       - name: Reporting scope tests
         run: /usr/bin/python3 releases/v0.34/tests/test_report_filter.py
+      - name: Reporting rotations, windows, exclusions and derived metrics
+        run: /usr/bin/python3 releases/v0.34/tests/test_reporting_engine.py
       - name: Upgrade transaction unit tests
         run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
       - name: Complete upgrade conflict and rollback tests

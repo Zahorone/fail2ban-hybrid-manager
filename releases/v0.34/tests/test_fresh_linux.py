@@ -3,7 +3,9 @@
 Not an apt/network download, real boot, ARM64 VM or reboot validation.
 """
 import hashlib
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -97,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         run('/usr/bin/python3', '/usr/local/libexec/f2b-runtime-verify.py', '--docker-check')
         run('bash', '/usr/local/bin/f2b', 'sync', 'check')
         audit = run('bash', '/usr/local/bin/f2b', 'audit').stdout
-        assert 'Total Jails' in audit and 'nginx-php-errors' not in audit
+        assert set(json.loads(audit)['jails']) == {'manualblock', 'recidive'}
         # Reconstruct the exact known partial legacy payload, retaining live bans.
         recovery_spec = importlib.util.spec_from_file_location('recovery', source / 'scripts/recover-fresh.py')
         recovery = importlib.util.module_from_spec(recovery_spec); recovery_spec.loader.exec_module(recovery)
@@ -135,6 +137,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         finally: sys.argv = original_argv
         assert marker.read_text() == 'complete\n'
         run('bash', '/usr/local/bin/f2b', 'sync', 'check')
+        assert run('bash', '/usr/local/bin/f2b', 'version', '--short').stdout.strip() == '0.34-dev'
         after = json.loads(run('nft', '-j', 'list', 'ruleset').stdout)
         assert m.load_upgrade().external_nft_digest(before) == m.load_upgrade().external_nft_digest(after)
         config_before = Path('/etc/nftables.conf').read_bytes()
@@ -277,6 +280,57 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         run('nft', 'delete', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.29 }')
         run('nft', 'add', 'element', 'inet', 'fail2ban-filter', effective4, '{ 192.0.2.27 }')
         run('/usr/bin/python3', str(diag.CHECKER), '--docker-check')
+        # Reporting-only deployment must preserve diagnostic/port hotfixes,
+        # active protection and private reporting preferences byte-for-byte.
+        report_spec = importlib.util.spec_from_file_location('report_hotfix', source / 'scripts/install-reporting-hotfix.py')
+        reporting = importlib.util.module_from_spec(report_spec); report_spec.loader.exec_module(reporting)
+        report_config = Path('/etc/f2b/reporting.ini')
+        report_config.write_text('[reporting]\nnpm_log_dir = ' + str(logs) +
+                                 '\nfail2ban_timezone = UTC\nsample_limit = 50\n')
+        preferences = report_config.read_bytes()
+        report_helper = reporting.transaction.CHECKER
+        report_helper.write_text(run('git', '-C', str(source.parents[1]), 'show',
+                                    'dc78f8b:releases/v0.34/scripts/f2b-report-filter.py').stdout)
+        old_reporting = {path: path.read_bytes() for path in (report_helper, reporting.transaction.WRAPPER)}
+        other_functions = {name: reporting.function(diag.WRAPPER.read_text(), name) for name in
+                           ('manage_block_port', 'manage_unblock_port', 'f2b_sync_check', 'f2b_docker_verify', 'manage_reload')}
+        old_config = repair.inventory()
+        old_diagnostic = diag.CHECKER.read_bytes()
+        plan = reporting.plan()
+        assert all(path.read_bytes() == data for path, data in old_reporting.items())
+        original_atomic = reporting.transaction.atomic
+        once = [False]
+        def fail_report_wrapper(path, data):
+            if path == reporting.transaction.WRAPPER and not once[0]:
+                once[0] = True; raise OSError('Synthetic reporting wrapper failure')
+            return original_atomic(path, data)
+        reporting.transaction.atomic = fail_report_wrapper
+        try: reporting.transaction.apply(plan)
+        except OSError: pass
+        else: raise AssertionError('Expected reporting code rollback')
+        finally: reporting.transaction.atomic = original_atomic
+        assert all(path.read_bytes() == data for path, data in old_reporting.items())
+        deployment_output = io.StringIO()
+        with contextlib.redirect_stdout(deployment_output): reporting.transaction.apply(reporting.plan())
+        report_backup = Path(next(line.split(': ', 1)[1] for line in deployment_output.getvalue().splitlines()
+                                  if line.startswith('Private diagnostic-code backup:')))
+        assert report_config.read_bytes() == preferences and repair.inventory() == old_config
+        assert diag.CHECKER.read_bytes() == old_diagnostic
+        assert Path('/usr/local/sbin/f2b-ipv6-sync.py').read_bytes() == sync_before
+        assert all(reporting.function(diag.WRAPPER.read_text(), name) == body for name, body in other_functions.items())
+        result = json.loads(run('bash', '/usr/local/bin/f2b', 'report', 'json').stdout)
+        assert result['schema'] == 2 and result['active']['ban_records_across_jails'] >= result['active']['unique_union']
+        assert json.loads(run('bash', '/usr/local/bin/f2b', 'audit').stdout)['unique_union'] > 0
+        assert run('bash', '/usr/local/bin/f2b', 'version', '--short').stdout.strip() == '0.34-dev'
+        assert 'loaded-action membership' in json.loads(run('bash', '/usr/local/bin/f2b', 'version', '--json').stdout)['diagnostics']
+        assert 'exact IPv4/IPv6' in run('bash', '/usr/local/bin/f2b', 'help').stdout
+        run('bash', '/usr/local/bin/f2b', 'audit-silent')
+        run('bash', '/usr/local/bin/f2b', 'sync', 'check')
+        reporting.rollback(report_backup)
+        assert all(path.read_bytes() == data for path, data in old_reporting.items())
+        assert report_config.read_bytes() == preferences and repair.inventory() == old_config
+        reporting.transaction.apply(reporting.plan())
+        print('PASS: reporting-only staging/rollback, pure JSON, active-ban audit success, precise labels and unchanged config/filter/mail/reconciler/port/diagnostic code')
         print('PASS: scoped diagnostic-only deployment, unchanged filters/reconciler/port functions, stale aliases ignored, interval union and true mismatch nonzero without repair')
         print('PASS: old error-only NPM profile repaired, rollback verified, whitelist/timed bans preserved and real polling auto-ban for both families (synthetic logs, not packets)')
         print('PASS: real fresh core install, active/log-backed jail count, dual-family bans, scoped persistence, foreign-rule preservation and rerun refusal (systemd simulated)')
