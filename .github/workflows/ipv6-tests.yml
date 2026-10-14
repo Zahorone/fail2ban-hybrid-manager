@@ -161,3 +161,30 @@ jobs:
             /tmp/f2b-complete-upgrade.tar.gz
             /tmp/f2b-complete-upgrade.tar.gz.sha256
             /tmp/f2b-complete-upgrade.tar.gz.json
+  v033_lab:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Explicit lab prerequisites in disposable runner
+        run: sudo apt-get update && sudo apt-get install -y fail2ban nftables cron acl attr gawk
+      - name: Build canonical lab and unchanged pinned upgrade
+        run: |
+          /usr/bin/python3 releases/v0.34/scripts/build-v033-lab.py /tmp/f2b-v033-lab.tar.gz
+          /usr/bin/python3 scripts/check-publication-safety.py --archive /tmp/f2b-v033-lab.tar.gz
+          git worktree add --detach /tmp/f2b-source1964 196400970b669f8fd43eebadad3b971125de857e
+          mkdir -p /tmp/f2b-pinned1964
+          /usr/bin/python3 /tmp/f2b-source1964/releases/v0.34/scripts/build-upgrade-package.py --integrated /tmp/f2b-pinned1964/f2b-complete-upgrade.tar.gz
+      - name: Lab archive bootstrap, pinned upgrade, rollback/restart and refusals (lifecycle simulated)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_v033_lab_linux.py
+      - name: Retain generic lab bootstrap (no runtime data)
+        uses: actions/upload-artifact@v4
+        with:
+          name: f2b-v033-lab-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            /tmp/f2b-v033-lab.tar.gz
+            /tmp/f2b-v033-lab.tar.gz.sha256
