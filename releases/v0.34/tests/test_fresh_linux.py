@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import datetime as dt
 
 sys.dont_write_bytecode = True
 
@@ -92,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         args.npm_log_dir = Path('/opt/synthetic-npm/logs'); args.npm_log_dir.mkdir(parents=True)
         for name in ('proxy-host-1_access.log', 'proxy-host-1_error.log', 'fallback_http_access.log'):
             (args.npm_log_dir / name).touch()
+        # A private local reporting path is an explicit input, never inferred
+        # from trusted probes or overwritten by installation.
+        reporting_input = Path('/etc/f2b/reporting.ini')
+        reporting_input.write_text('[reporting]\nnpm_log_dir = ' + str(args.npm_log_dir) + '\n')
+        reporting_bytes = reporting_input.read_bytes()
+        stamp = dt.datetime.now(dt.timezone.utc).strftime('%d/%b/%Y:%H:%M:%S %z')
+        (args.npm_log_dir / 'proxy-host-1_access.log').write_text('[' + stamp + '] - 200 200 - GET https app.example.invalid "/" [Client 192.0.2.10]\n')
     selected = m.policy(args)
     assert set(selected[1]) >= {'recidive', 'manualblock'}
     if args.npm_log_dir: assert len(selected[1]) > 2
@@ -117,7 +125,10 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
             run('bash', '/usr/local/bin/f2b', 'docker', 'verify')
             assert 'FOUND TIMELINE' in run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis').stdout
             assert run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis', 'short').stdout.startswith('Reporting schema 2;')
-            json.loads(run('bash', '/usr/local/bin/f2b', 'report', 'json').stdout)
+            artifact_report = json.loads(run('bash', '/usr/local/bin/f2b', 'report', 'json').stdout)
+            if args.npm_log_dir:
+                assert reporting_input.read_bytes() == reporting_bytes
+                assert artifact_report['http_window']['parsed_records'] == 1
             run('bash', '/usr/local/bin/f2b', 'manage', 'block-port', '12345')
             assert '12345' in Path('/etc/nftables.d/docker-block.nft').read_text()
             run('unshare', '--net', 'nft', '-f', '/etc/nftables.conf')

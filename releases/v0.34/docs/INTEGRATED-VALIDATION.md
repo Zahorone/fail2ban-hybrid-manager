@@ -127,7 +127,12 @@ sudo fail2ban-client status
 
 Compare actual active jails against the preflight's selected/log-backed profile.
 Do not require a fixed maximum count. Configure private reporting paths/probe rules
-locally as needed; never copy real values into the artifact. Full/short scope flags
+locally as needed; never copy real values into the artifact. Fresh's `--npm-log-dir`
+selects jail inputs; reporting keeps its separate explicit local configuration.
+For this lab, create or edit `/etc/f2b/reporting.ini` privately with a `[reporting]`
+section and `npm_log_dir = /opt/f2b-npm-lab/data/logs`. Do not overwrite an existing
+file or install blanket probe rules. CI supplies this synthetic local input and
+verifies both its preservation and an actual parsed HTTP record. Full/short scope flags
 and JSON/CSV must work; unknown analysis arguments must fail.
 
 ## C. Manager upgrade, reapply, rollback (Ubuntu 24 amd64 clone)
