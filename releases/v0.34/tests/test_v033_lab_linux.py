@@ -68,7 +68,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     original_load = b.load
     b.load = lambda name, file: fresh if name == 'lab_fresh' else original_load(name, file)
     try:
-        parent = Path('/etc/fail2ban/jail.d'); saved_parent = directory / 'jail-parent'
+        # Rename within the same private bind mount, not across /etc -> /tmp.
+        parent = Path('/etc/fail2ban/jail.d'); saved_parent = parent.with_name('jail.d-fixture-saved')
         parent.rename(saved_parent); parent.symlink_to(saved_parent)
         try: b.preflight(upgrade)
         except ValueError as error: assert 'Unsafe' in str(error)
