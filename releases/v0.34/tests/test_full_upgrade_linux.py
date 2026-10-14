@@ -123,7 +123,9 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert reporting_config.read_bytes() == reporting_before
         database = Path('/var/lib/fail2ban/fail2ban.sqlite3')
         if database.exists():
-            with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as connection:
+            # sqlite's context manager ends a transaction; it does NOT close
+            # the handle, which otherwise pins our private DB mount at cleanup.
+            with contextlib.closing(sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True)) as connection:
                 assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert all(path.read_bytes() == contents for path, contents in preserved_overrides.items())
         assert apache.read_bytes() == apache_before and apache_link.is_symlink() and apache_link.resolve() == apache
