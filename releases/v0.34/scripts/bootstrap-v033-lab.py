@@ -85,6 +85,12 @@ def preflight(bundle):
     fresh.platform_check(); fresh.file_guards()
     fresh.dependencies(argparse.Namespace(ssh=False, docker=False, mail_to=None, install_prerequisites=False))
     foreign = fresh.nft_preflight()
+    written = ('/etc/fail2ban/jail.d/zz-v033-lab.local', '/etc/f2b/v033-lab.state',
+               '/etc/nftables.conf', '/etc/nftables.d/fail2ban-filter.nft', '/etc/nftables.d/docker-block.nft',
+               '/var/log/fail2ban.log', '/var/log/fail2ban-blocked-ips.txt', '/var/log/f2b-docker-sync.log', '/var/log/f2b-wrapper.log')
+    for name in written:
+        target = Path(name); safe(target)
+        if target.exists() and not target.is_file(): raise ValueError('Expected regular lab output target')
     for target, source in mapping().items():
         safe(target)
         if target.exists():

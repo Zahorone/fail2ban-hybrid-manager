@@ -68,6 +68,13 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     original_load = b.load
     b.load = lambda name, file: fresh if name == 'lab_fresh' else original_load(name, file)
     try:
+        parent = Path('/etc/fail2ban/jail.d'); saved_parent = directory / 'jail-parent'
+        parent.rename(saved_parent); parent.symlink_to(saved_parent)
+        try: b.preflight(upgrade)
+        except ValueError as error: assert 'Unsafe' in str(error)
+        else: raise AssertionError('Symlink parent was accepted')
+        assert not (saved_parent / 'zz-v033-lab.local').exists()
+        parent.unlink(); saved_parent.rename(parent)
         before = {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         b.preflight(upgrade)
         assert before == {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
