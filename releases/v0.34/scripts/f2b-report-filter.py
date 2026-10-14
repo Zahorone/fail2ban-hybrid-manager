@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -288,8 +289,11 @@ def build_report(settings, now=None, runtime=None, scope='all'):
     excluded = [record for record in http if any(rule.matches(record['line']) for rule in settings['rules'])]
     included = [record for record in http if not any(rule.matches(record['line']) for rule in settings['rules'])]
     candidate_records = 0
+    paths, candidate_paths = Counter(), Counter()
+    for record in http: paths[urlsplit(record['path']).path] += 1
     for record in included:
         hints = indicators(record); candidate_records += bool(hints); categories.update(hints)
+        if hints: candidate_paths[urlsplit(record['path']).path] += 1
     raw_errors = sum(v['status'] >= 400 for v in http)
     included_errors = sum(v['status'] >= 400 for v in included)
     ratio = lambda count, denominator: count / denominator if denominator else None
@@ -320,6 +324,11 @@ def build_report(settings, now=None, runtime=None, scope='all'):
                               'average_per_hour': events['found'] / 24 if f2b_coverage['files'] else None,
                               'peak_rolling_hour_records': max(bins) if f2b_coverage['files'] else None},
             'recent_ban_event_sample': [{'timestamp_utc': r['time'].isoformat(), 'jail': r['jail'], 'kind': r['kind']} for r in f2b],
+            'presentation_top': {
+                'raw_sample_paths': paths.most_common(10),
+                'included_candidate_paths': candidate_paths.most_common(10),
+                'event_jails': sorted(({'jail': jail, 'events': dict(counter)} for jail, counter in by_jail.items()),
+                                      key=lambda item: (-sum(item['events'].values()), item['jail']))[:10]},
             'interpretation': 'HTTP errors are not attacks; request indicators are candidates; Found/Ban records may overlap. No compromise, audit-failure or enforcement claim.'}
 
 
@@ -357,13 +366,95 @@ def human(report, scope='all'):
                    'Log coverage: ' + json.dumps(report['coverage'], sort_keys=True) + '\n' + report['interpretation'])
 
 
+def terminal_text(value):
+    # Log-derived paths/jails may contain control sequences. Render as text,
+    # never allow a request target to inject terminal escapes or extra rows.
+    return ''.join(c if c.isprintable() else '\\u%04x' % ord(c) for c in str(value))
+
+
+def full_human(report, scope='all', color=False):
+    width = 86
+    lines = []
+    def row(text=''):
+        text = terminal_text(text)
+        for part in textwrap.wrap(text, width - 4, break_on_hyphens=False, replace_whitespace=False) or ['']:
+            lines.append('│ ' + part.ljust(width - 4) + ' │')
+    def section(title):
+        lines.append('├' + '─' * (width - 2) + '┤')
+        row(title)
+        if color: lines[-1] = '\x1b[1;36m' + lines[-1] + '\x1b[0m'
+    def number(value): return 'unavailable' if value is None else str(value)
+    def top(title, items, available):
+        row(title)
+        if not available: row('  unavailable: no matching log files')
+        elif not items: row('  no observed records in selected sample')
+        for key, count in items: row('  ' + str(count).rjust(6) + '  ' + terminal_text(key))
+    def events(values):
+        for key in ('found', 'new_ban', 'restored_ban', 'extended_ban', 'unban'):
+            row('  ' + key.ljust(17) + number(values[key]))
+    active, sample, coverage = report['active'], report['http_sample'], report['coverage']
+    lines.append('┌' + '─' * (width - 2) + '┐')
+    row('ATTACK ANALYSIS | schema 2 | scope=' + scope)
+    row('Observed records and request indicators; not confirmed independent attacks')
+    row('UTC window: ' + report['cutoff_utc'] + ' -> ' + report['as_of_utc'])
+    section('ACTIVE BAN SNAPSHOT — all jails, not a health verdict')
+    row('Ban records across jails: ' + str(active['ban_records_across_jails']))
+    row('Unique IPv4: ' + str(active['unique_ipv4']) + ' | IPv6: ' + str(active['unique_ipv6']) +
+        ' | union: ' + str(active['unique_union']))
+    if scope != 'ssh-only':
+        available = bool(coverage['http']['files'])
+        section('HTTP — exact 24h observations and bounded chronological sample')
+        row('Coverage: ' + coverage['http']['availability'])
+        row('24h parsed records: ' + number(report['http_window']['parsed_records']) +
+            ' | raw HTTP errors: ' + number(report['http_window']['raw_http_errors']))
+        row('Sample: latest ' + str(sample['raw_records']) + ' / limit ' + str(sample['limit']) +
+            ' records BEFORE explicit trusted-probe exclusions')
+        row('Trusted probes: ' + str(sample['trusted_probe_records']) + ' | included: ' + str(sample['included_records']))
+        if available:
+            row('Raw HTTP error records: ' + str(sample['raw_http_errors']) + '/' + str(sample['raw_records']))
+            row('Security-candidate records: ' + str(sample['candidate_records']) + '/' + str(sample['included_records']))
+        else: row('HTTP error/candidate activity: unavailable (empty sample is not zero traffic)')
+        section('TOP REQUEST PATHS — raw sample, query values omitted')
+        top('Raw sample paths (includes trusted probes):', report['presentation_top']['raw_sample_paths'], available)
+        top('Candidate paths (included sample only):', report['presentation_top']['included_candidate_paths'], available)
+        top('Candidate category hits (overlap; DO NOT sum as attempts):',
+            sorted(sample['category_hits'].items(), key=lambda item: (-item[1], item[0])), available)
+    if scope != 'npm-only':
+        section('SSH JAIL SIGNALS — not every raw authentication attempt')
+        events(report['ssh_events_24h'])
+    section('FAIL2BAN EVENTS — all jails, observed last 24h')
+    events(report['fail2ban_events_24h'])
+    row('Top event jails (Found/Ban may overlap; not unique attackers):')
+    if not coverage['fail2ban']['files']: row('  unavailable: no matching log files')
+    elif not report['presentation_top']['event_jails']: row('  no observed event records')
+    for item in report['presentation_top']['event_jails']:
+        row('  ' + item['jail'] + ': ' + ', '.join(k + '=' + str(v) for k, v in sorted(item['events'].items())))
+    section('FOUND TIMELINE — all jails, 24 UTC bins anchored at window start')
+    bins = report['found_timeline']
+    peak = max((b['found_records'] or 0 for b in bins), default=0)
+    for item in bins:
+        count = item['found_records']
+        bar = '' if count is None else '█' * (max(1, round(count / peak * 25)) if count else 0)
+        row(item['start_utc'][5:16].replace('T', ' ') + ' UTC  ' + number(count).rjust(11) + '  ' + bar)
+    section('COVERAGE AND INTERPRETATION')
+    for source, values in coverage.items():
+        if source == 'http' and scope == 'ssh-only': row('http: not selected (--ssh-only)'); continue
+        row(source + ': ' + values['availability'] + '; files=' + str(values['files']) +
+            '; unparsed=' + str(values['unparsed_lines']) + '; invalid=' + str(values['invalid_records']) +
+            '; ambiguous DST=' + str(values['ambiguous_local_time_records']))
+    row('Log presence does not prove complete 24h coverage. Repeated records are not deduplicated.')
+    row(report['interpretation'])
+    lines.append('└' + '─' * (width - 2) + '┘')
+    return '\n'.join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/etc/f2b/reporting.ini")
     parser.add_argument('--report', choices=('json', 'csv', 'daily', 'analysis', 'timeline', 'trends', 'audit', 'stats', 'version'))
     parser.add_argument('--npm-dir')
     parser.add_argument('--scope', choices=('all', 'npm-only', 'ssh-only'), default='all')
-    parser.add_argument('--format', choices=('human', 'json', 'short'), default='human')
+    parser.add_argument('--format', choices=('human', 'json', 'short', 'full'), default='human')
     parser.add_argument('--version', default='unknown')
     parser.add_argument('--release', default='unknown')
     parser.add_argument('--builddate', default='unknown')
@@ -403,6 +494,9 @@ def main() -> int:
                                                            'coverage': report['coverage']['fail2ban'], 'interpretation': report['interpretation']}, sort_keys=True))
             elif args.report == 'timeline': print(json.dumps({'as_of_utc': report['as_of_utc'], 'found_timeline': report['found_timeline'],
                                                              'events_24h': report['fail2ban_events_24h'], 'coverage': report['coverage']['fail2ban']}, sort_keys=True))
+            elif args.report == 'analysis' and args.format != 'short':
+                color = sys.stdout.isatty() and os.environ.get('TERM', '') != 'dumb' and 'NO_COLOR' not in os.environ
+                print(full_human(report, args.scope, color=color))
             else: print(human(report, args.scope))
             return 0
         rules = load_rules(Path(args.config))

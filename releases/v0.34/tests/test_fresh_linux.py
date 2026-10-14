@@ -289,8 +289,16 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
                                  '\nfail2ban_timezone = UTC\nsample_limit = 50\n')
         preferences = report_config.read_bytes()
         report_helper = reporting.transaction.CHECKER
+        # Recreate the already-deployed reporting hotfix (not private server data),
+        # retaining the current local port/diagnostic functions and preferences.
+        deployed_wrapper = run('git', '-C', str(source.parents[1]), 'show',
+                               reporting.REPORTING_BASELINE + ':releases/v0.34/scripts/f2b-wrapper-v034.sh').stdout
+        wrapper_text = reporting.transaction.WRAPPER.read_text()
+        for name in ('report_attack_analysis', 'main', 'show_help'):
+            wrapper_text = wrapper_text.replace(reporting.function(wrapper_text, name), reporting.function(deployed_wrapper, name), 1)
+        reporting.transaction.WRAPPER.write_text(wrapper_text)
         report_helper.write_text(run('git', '-C', str(source.parents[1]), 'show',
-                                    'dc78f8b:releases/v0.34/scripts/f2b-report-filter.py').stdout)
+                                    reporting.REPORTING_BASELINE + ':releases/v0.34/scripts/f2b-report-filter.py').stdout)
         old_reporting = {path: path.read_bytes() for path in (report_helper, reporting.transaction.WRAPPER)}
         other_functions = {name: reporting.function(diag.WRAPPER.read_text(), name) for name in
                            ('manage_block_port', 'manage_unblock_port', 'f2b_sync_check', 'f2b_docker_verify', 'manage_reload')}
@@ -324,6 +332,15 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         assert run('bash', '/usr/local/bin/f2b', 'version', '--short').stdout.strip() == '0.34-dev'
         assert 'loaded-action membership' in json.loads(run('bash', '/usr/local/bin/f2b', 'version', '--json').stdout)['diagnostics']
         assert 'exact IPv4/IPv6' in run('bash', '/usr/local/bin/f2b', 'help').stdout
+        assert 'report attack-analysis short' in run('bash', '/usr/local/bin/f2b', 'help').stdout
+        full = run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis').stdout
+        short = run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis', 'short').stdout
+        assert 'FOUND TIMELINE' in full and '┌' in full and '\x1b' not in full
+        assert short.startswith('Reporting schema 2;') and '┌' not in short
+        for scope in ('--npm-only', '--ssh-only'):
+            assert 'scope=' + scope[2:] in run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis', scope, 'short').stdout
+        invalid = run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis', '--unknown', check=False)
+        assert invalid.returncode == 2 and not invalid.stdout and 'Unknown attack-analysis argument' in invalid.stderr
         run('bash', '/usr/local/bin/f2b', 'audit-silent')
         run('bash', '/usr/local/bin/f2b', 'sync', 'check')
         reporting.rollback(report_backup)

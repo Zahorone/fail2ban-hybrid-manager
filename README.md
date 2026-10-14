@@ -28,6 +28,24 @@ See the [v0.34 guide](releases/v0.34/docs/README.md) and
 [access-filter safety contract](releases/v0.34/docs/ACCESS-FILTER-SAFETY.md).
 Canonical filters, actions and product scripts are intentionally public.
 
+## Terminal reporting
+
+```sh
+sudo f2b report attack-analysis                    # graphical 24h report
+sudo f2b report attack-analysis short              # compact summary
+sudo f2b report attack-analysis short --npm-only    # scope and short in either order
+sudo f2b report attack-analysis --ssh-only short
+sudo f2b report json                               # pure schema-2 JSON
+sudo f2b report csv                                # current per-jail ban snapshot
+```
+
+Full and short reports use the same schema-2 observations, explicit probe rules
+and chronological sample. Terminal colors are disabled for redirected output,
+`TERM=dumb`, or `NO_COLOR`; JSON/CSV never contain terminal formatting.
+For already installed reporting code, use the scoped
+[reporting-only preflight/apply/rollback](releases/v0.34/docs/REPORTING-ONLY-HOTFIX.md),
+not a full reinstall. This does not change filters, bans or local reporting.ini.
+
 ## Releases
 
 - **v0.34-dev** — current development baseline: transactional upgrade/rollback,

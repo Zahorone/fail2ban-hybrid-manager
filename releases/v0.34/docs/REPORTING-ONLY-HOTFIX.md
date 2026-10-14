@@ -25,6 +25,20 @@ are needed to develop or test it; public tests use synthetic examples only.
 The existing `f2b-report-filter.py` now also provides the canonical report engine;
 its original stdin filtering interface remains compatible. Report entrypoints call
 it directly, so raw HTTP counts, exclusions and security views use one parser.
+The default `report attack-analysis` is now a graphical presentation over this
+same engine. `report attack-analysis short` preserves the deployed compact human
+formatter unchanged. Either accepts one `--npm-only` or `--ssh-only`, before or
+after `short`. Unknown/duplicate arguments return 2. The current global snapshot,
+all-jail event counts and UTC timeline remain explicitly global under either scope;
+only the HTTP/SSH-specific sections are selected. Daily remains compact.
+
+Full output uses Unicode frames, TTY-only ANSI colors (disabled by `NO_COLOR` or
+`TERM=dumb`), top raw-sample paths, included candidate paths/categories and observed
+event-jail summaries. Query values are omitted from paths, request control bytes
+are escaped, and graph bars are scaled to the largest of the same 24 anchored UTC
+bins. Rankings count records/hits, not proven independent attacks or defenders'
+effectiveness. Additive `presentation_top` fields do not change existing schema-2
+counters, sampling, time windows or exclusions. JSON/CSV have no ANSI/banner.
 Unified commands: `report attack-analysis` (including existing scope flags),
 `report timeline`, `report daily`, `monitor trends`, `report json`, `report csv`,
 `audit`, `audit-silent`, `stats-quick`, and version metadata. CSV intentionally
@@ -121,6 +135,11 @@ path, unknown local report helper or unrecognized routing is refused for review.
 Dependencies are system Python 3.9+ with zoneinfo/timezone data and the distro
 Fail2Ban CSocket module, plus Bash; no packages are installed. Git history is used
 only to recognize the published old helper during deployment, not by runtime reports.
+The recognized helper baselines include the deployed reporting hotfix
+`7e41be127a5d159f12c656fbc0ab5ea7123df831`, the earlier canonical helper, and the
+current exact helper. Upgrading an unmodified deployed 7e41be1 helper is supported;
+unknown local helper edits are still refused, not silently overwritten. Keep the
+checkout's Git history available to preflight. No new runtime package is required.
 
 Only after preflight PASS and operator approval:
 
@@ -132,6 +151,8 @@ sudo f2b help
 sudo f2b audit
 sudo f2b report json
 sudo f2b report daily
+sudo f2b report attack-analysis
+sudo f2b report attack-analysis short --npm-only
 ```
 
 Apply creates a root-private code backup/checksum manifest through the existing

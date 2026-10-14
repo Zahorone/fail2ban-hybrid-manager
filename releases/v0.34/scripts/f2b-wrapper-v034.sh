@@ -2007,7 +2007,19 @@ security_summary_recommendations() {
 
 
 report_attack_analysis() {
-    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report analysis --scope "${1:-all}" \
+    local scope="all" format="full" arg
+    for arg in "$@"; do
+        case "$arg" in
+            short) if [ "$format" = "full" ]; then format="short"; else
+                echo 'Duplicate short argument' >&2; return 2; fi ;;
+            --npm-only|--ssh-only)
+                if [ "$scope" != "all" ]; then echo 'Choose only one scope' >&2; return 2; fi
+                scope="${arg#--}" ;;
+            *) echo "Unknown attack-analysis argument: $arg" >&2
+               echo 'Usage: f2b report attack-analysis [short] [--npm-only|--ssh-only]' >&2; return 2 ;;
+        esac
+    done
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report analysis --scope "$scope" --format "$format" \
       --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
@@ -2088,7 +2100,9 @@ REPORTS:
   report daily                       Daily summary report
   report timeline                    Attack wave timeline (24h)
   report attack-analysis [--npm-only|--ssh-only]
-                                     Complete attack analysis
+                                     Full graphical terminal report (24h)
+  report attack-analysis short [--npm-only|--ssh-only]
+                                     Compact schema-2 summary (short/scope in either order)
 
 SILENT (for cron):
   audit-silent                       Silent audit
@@ -2108,6 +2122,8 @@ EXAMPLES:
   sudo f2b report json > /tmp/f2b-report.json
   sudo f2b monitor watch
   sudo f2b report attack-analysis
+  sudo f2b report attack-analysis short
+  sudo f2b report attack-analysis --npm-only short
   sudo f2b report timeline
 
 EOF
@@ -2217,11 +2233,7 @@ main() {
             csv)             report_csv ;;
             daily)           report_daily ;;
             attack-analysis)
-                case "$3" in
-                    --npm-only) report_attack_analysis "npm-only" ;;
-                    --ssh-only) report_attack_analysis "ssh-only" ;;
-                    *)          report_attack_analysis "all" ;;
-                esac
+                report_attack_analysis "${@:3}"
                 ;;
             timeline)
                 report_attack_timeline
