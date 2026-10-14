@@ -106,7 +106,13 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         assert Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes() == policy
         assert Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes() == sink
         run('systemctl', 'restart', 'fail2ban'); fresh.wait_ready(b.lab_policy()[1])
-        for address in ('192.0.2.8', '2001:db8::8'): assert address in run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
+        # Active jail registration precedes the action worker's DB restore.
+        # Observe a bounded restore; never re-add a missing ticket to pass.
+        for _ in range(200):
+            restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
+            if all(address in restored for address in ('192.0.2.8', '2001:db8::8')): break
+            time.sleep(.1)
+        else: raise AssertionError('Timed bans absent after bounded rollback restart restore: ' + restored)
         run(*command)
         assert run('nft', '-s', 'list', 'table', 'inet', 'synthetic-foreign').stdout == before_foreign
         print('PASS: exact canonical lab archive, readonly preflight, bootstrap/restart, pinned 1964009 upgrade, rollback/restart/repreflight, overrides/both-family bans/foreign rules preserved; systemd/platform simulated')
