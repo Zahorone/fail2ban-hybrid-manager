@@ -20,16 +20,23 @@ The lab payload contains only canonical filters/actions/jail.local/wrapper/hook/
 reconciler plus this bootstrap and guide; no Git repository, old installers, logs,
 DB, real hosts/IP/email/credentials or private hash reviews. SHA256SUMS and
 LAB-MANIFEST identify both canonical baseline and bootstrap commits. Canonical
-example email strings remain unchanged, but **all mail actions are disabled** by
-the explicit lab jail policy. No package installation is hidden in the bootstrap.
+example email strings remain unchanged. Non-PHP mail actions are disabled;
+the genuine PHP binary-safe mail action is retained, but its transport is an
+explicit local file sink and external whois is replaced with synthetic text.
+No SMTP/MTA command or external whois query is used. No package installation is hidden in the bootstrap.
 
-One local file, `/etc/fail2ban/jail.d/zz-v033-lab.local`, documents the lab policy:
+`/etc/fail2ban/jail.d/zz-v033-lab.local` documents the lab policy:
 SSH jails disabled (no real authentication log input); other canonical jails use
-synthetic application files; nft+Docker hooks retained, mail removed; manualblock
+synthetic application files; nft+Docker hooks retained, non-PHP mail removed; manualblock
 has a 7200s bantime and the whitelist adds only documentation addresses. This is
 not a detection-filter repair or permission to ignore real attacks. The override
 must remain compatible with both baseline and upgrade candidate; the test invokes
 real preflight before and after upgrade/rollback and restarts the restored baseline.
+`/etc/fail2ban/action.d/sendmail-whois-lines.local` changes only the lab transport
+and whois helper; it does not replace actionban/evidence grep or any detection
+filter. PHP retains actual `grepopts=-a -m <grepmax>`, as required by the pinned
+upgrade validator. The root-private local sink is `/var/log/f2b-v033-lab-mail.log`.
+It is never archived/uploaded. Both explicit local files survive upgrade/rollback.
 
 ## Transfer two independently verified artifacts
 
@@ -62,7 +69,13 @@ F2B_UPGRADE_ROOT="$PWD/f2b-integrated-v034-dev-1964009"
 
 ## Prerequisites are a separate explicit operator action
 
-On the clean Ubuntu 26.04 ARM64 clone (not the existing configured VM):
+First run the read-only command below. If it reports missing prerequisites, this
+is a refusal, not permission for hidden changes. On the clean Ubuntu 26.04 ARM64
+clone (not the existing configured VM), explicitly install them, then repeat check:
+
+```sh
+sudo /usr/bin/python3 "$F2B_LAB_ROOT/scripts/bootstrap-v033-lab.py" --upgrade-bundle "$F2B_UPGRADE_ROOT" --check
+```
 
 ```sh
 sudo apt-get update &&

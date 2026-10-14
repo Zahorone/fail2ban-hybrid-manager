@@ -79,15 +79,28 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         b.preflight(upgrade)
         assert before == {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         b.apply(upgrade)
+        mail = run('fail2ban-client', 'get', 'nginx-php-errors', 'action', 'sendmail-whois-lines', 'actionban').stdout
+        assert 'Synthetic lab: external whois disabled' in mail
+        assert '/bin/cat >> /var/log/f2b-v033-lab-mail.log' in mail
+        run('fail2ban-client', 'set', 'nginx-php-errors', 'banip', '192.0.2.18')
+        import time
+        for _ in range(100):
+            if '192.0.2.18' in Path('/var/log/f2b-v033-lab-mail.log').read_text(): break
+            time.sleep(.1)
+        else: raise AssertionError('Genuine mail action did not reach local-only sink')
+        run('fail2ban-client', 'set', 'nginx-php-errors', 'unbanip', '192.0.2.18')
         canonical = {target: target.read_bytes() for target in b.mapping()}
         policy = Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes()
+        sink = Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes()
         command = ['/usr/bin/python3', str(upgrade / 'scripts/upgrade-v033-v034.py')]
         result = run(*command, '--apply', '--backup-dir', str(directory / 'backups'))
         backup = next(line.split(': ', 1)[1] for line in result.stdout.splitlines() if line.startswith('Backup complete:'))
         assert Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes() == policy
+        assert Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes() == sink
         run(*command, '--rollback', backup)
         assert all(path.read_bytes() == data for path, data in canonical.items())
         assert Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes() == policy
+        assert Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes() == sink
         run('systemctl', 'restart', 'fail2ban'); fresh.wait_ready(b.lab_policy()[1])
         for address in ('192.0.2.8', '2001:db8::8'): assert address in run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
         run(*command)

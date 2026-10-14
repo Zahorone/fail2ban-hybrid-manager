@@ -18,6 +18,10 @@ import time
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = '196400970b669f8fd43eebadad3b971125de857e'
+MAIL_SINK = ('# Synthetic lab only: preserve the real binary-safe mail action,\n'
+             '# but consume its output locally and never query external whois.\n'
+             '[Definition]\n_whois_command = printf %%b "Synthetic lab: external whois disabled\\n"\n'
+             '[Init]\nmailcmd = /bin/cat >> /var/log/f2b-v033-lab-mail.log\n')
 
 
 def run(*parts):
@@ -65,6 +69,12 @@ def lab_policy():
             output[jail]['action'] = ('nftables-recidive[name=%(__name__)s, bantime="%(bantime)s", port="%(port)s", '
                                      'protocol="%(protocol)s", chain="%(chain)s"]\ndocker-sync-hook')
     output['manualblock']['bantime'] = '7200'
+    # The pinned upgrade requires this genuine binary-safe evidence action.
+    # Keep it; change only its transport via the explicit action .local below.
+    output['nginx-php-errors']['action'] = (
+        '%(banaction)s[port="%(port)s", protocol="%(protocol)s"]\ndocker-sync-hook\n'
+        'sendmail-whois-lines[dest="%(destemail)s", sender="%(sender)s", sendername="%(sendername)s", '
+        'protocol="%(protocol)s", chain="%(chain)s", logpath="%(logpath)s", grepopts="-a -m <grepmax>"]')
     stream = io.StringIO(); output.write(stream); return stream.getvalue(), [j for j in parser.sections() if output[j]['enabled'] == 'true']
 
 
@@ -87,6 +97,7 @@ def preflight(bundle):
     foreign = fresh.nft_preflight()
     written = ('/etc/fail2ban/jail.d/zz-v033-lab.local', '/etc/f2b/v033-lab.state',
                '/etc/nftables.conf', '/etc/nftables.d/fail2ban-filter.nft', '/etc/nftables.d/docker-block.nft',
+               '/etc/fail2ban/action.d/sendmail-whois-lines.local', '/var/log/f2b-v033-lab-mail.log',
                '/var/log/fail2ban.log', '/var/log/fail2ban-blocked-ips.txt', '/var/log/f2b-docker-sync.log', '/var/log/f2b-wrapper.log')
     for name in written:
         target = Path(name); safe(target)
@@ -108,6 +119,7 @@ def preflight(bundle):
             if str(target).startswith('/etc/fail2ban/'):
                 destination = candidate / target.relative_to('/etc/fail2ban'); destination.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(source, destination)
         (candidate / 'jail.d/zz-v033-lab.local').write_text(policy)
+        (candidate / 'action.d/sendmail-whois-lines.local').write_text(MAIL_SINK)
         # Shadow-only log paths let -t validate without manufacturing live logs.
         fixture = Path(directory) / 'synthetic.log'; fixture.touch()
         shadow = configparser.ConfigParser(interpolation=None)
@@ -149,6 +161,8 @@ def apply(bundle):
         target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(source, target)
         target.chmod(0o755 if str(target).startswith('/usr/local/') else 0o644)
     Path('/etc/fail2ban/jail.d/zz-v033-lab.local').write_text(policy)
+    Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').write_text(MAIL_SINK)
+    Path('/var/log/f2b-v033-lab-mail.log').touch(mode=0o600)
     Path('/opt/rustnpm/data/logs').mkdir(parents=True)
     for name in ('fallback_access.log', 'fallback_http_access.log', 'fallback_error.log', 'proxy-host-1_access.log', 'proxy-host-1_error.log'):
         (Path('/opt/rustnpm/data/logs') / name).touch()
