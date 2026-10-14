@@ -1,6 +1,16 @@
 # Reporting-only exclusions. These rules do not alter Fail2Ban filters or bans.
 # Copy to /etc/f2b/reporting.ini and replace every example value.
 # A line is excluded only when source, method, host, status and exact path match.
+# Raw HTTP counts remain visible in schema-2 reports; only security views exclude
+# matched probes. No API prefix or source-only wildcard is implicitly benign.
+
+[reporting]
+# Optional local paths; never copy production values into the repository.
+# npm_log_dir = /path/to/real/npm/logs
+# fail2ban_log = /var/log/fail2ban.log
+fail2ban_timezone = system
+sample_limit = 5000
+ssh_jails = sshd, sshd-slowattack
 
 [trusted-probe "rustdesk-example"]
 source = 192.0.2.10/32

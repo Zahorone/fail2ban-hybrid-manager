@@ -107,7 +107,8 @@ def inspect(backup):
     if marker.read_text() != 'incomplete; inspect backup before recovery\n':
         raise fresh.FreshError('Not the recognized incomplete fresh transaction')
     replacements = {str(t): s for t, s in mapping().items()
-                    if str(t) in {'/usr/local/bin/f2b', '/usr/local/libexec/f2b-runtime-verify.py'}}
+                    if str(t) in {'/usr/local/bin/f2b', '/usr/local/libexec/f2b-runtime-verify.py',
+                                  '/usr/local/libexec/f2b-report-filter.py'}}
     for name, expected in {**originals, **targets}.items():
         file = fresh.path(name); secure(file)
         allowed = [expected]

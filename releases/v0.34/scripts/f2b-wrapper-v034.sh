@@ -475,122 +475,11 @@ f2b_alert_now() {
 #  --short : iba VERSION string (na skripty)
 #  --human : pekný ľudský výstup (default)
 f2b_version() {
-  local mode="${1:---human}"
-  local binary_path
-  local jails_count=0
-
-  case "$mode" in
-    --json)
-      binary_path=$(readlink -f "$(command -v f2b 2>/dev/null)" 2>/dev/null \
-        || echo "/usr/local/bin/f2b")
-
-      if systemctl is-active --quiet fail2ban 2>/dev/null; then
-        jails_count=$(fail2ban-client status 2>/dev/null \
-          | grep "Jail list" \
-          | sed 's/.*Jail list:\s*//' \
-          | tr ',' '\n' \
-          | grep -c '.')
-      fi
-
-      cat <<EOF
-{
-  "release": "${RELEASE}",
-  "version": "${VERSION}",
-  "builddate": "${BUILD_DATE}",
-  "dockerblock_version": "${DOCKER_BLOCK_VERSION}",
-  "component": "${COMPONENT_NAME}",
-  "fail2ban_jails": ${jails_count},
-  "binary": "${binary_path}"
-}
-EOF
-      ;;
-
-    --short)
-      echo "${VERSION}"
-      ;;
-
-    --human|*)
-      log_header "F2B Unified Wrapper ${RELEASE}"
-      echo
-      echo "Version      : ${VERSION}"
-      echo "Build        : ${BUILD_DATE}"
-      echo "Component    : ${COMPONENT_NAME}"
-      echo "Docker-block : v${DOCKER_BLOCK_VERSION}"
-      echo
-
-      local f2b_path checksum
-      f2b_path="$(command -v f2b 2>/dev/null || echo "not in PATH")"
-      echo "Binary       : ${f2b_path}"
-      if [ -x "${f2b_path}" ] && [ "${f2b_path}" != "not in PATH" ]; then
-        checksum=$(sha256sum "${f2b_path}" 2>/dev/null | awk '{print $1}' | cut -c1-16)
-        echo "Checksum     : sha256:${checksum:-unavailable}"
-      fi
-      echo
-
-      echo "Components:"
-      echo "  - Fail2Ban nftables integration"
-      echo "  - Docker port blocking v${DOCKER_BLOCK_VERSION}"
-      echo "  - Enhanced sync monitoring"
-      echo "  - Attack analysis reporting"
-      echo "  - Real-time Dashboard"
-      echo
-
-      if systemctl is-active --quiet fail2ban 2>/dev/null; then
-        echo "Configuration:"
-        if nft list table inet fail2ban-filter >/dev/null 2>&1; then
-          echo "  - Table inet fail2ban-filter"
-
-          local jails_active sets_v4 sets_v6 missing_v6 setname jail
-          jails_active=$(fail2ban-client status 2>/dev/null \
-            | grep "Jail list" \
-            | sed 's/.*Jail list:\s*//' \
-            | tr ',' '\n' \
-            | grep -c '.')
-          echo "  - Jails: ${jails_active} active"
-
-          sets_v4=0
-          sets_v6=0
-          missing_v6=0
-
-          for jail in "${JAILS[@]}"; do
-            setname="$(ipv4_set_for_jail "$jail")"
-            [ -z "${setname}" ] && continue
-
-            if sudo nft list set inet fail2ban-filter "${setname}" >/dev/null 2>&1; then
-              sets_v4=$((sets_v4 + 1))
-            fi
-            if ipv6_set_for_jail "$jail" >/dev/null; then
-              sets_v6=$((sets_v6 + 1))
-            else
-              missing_v6=$((missing_v6 + 1))
-            fi
-          done
-
-          local sets_total
-          sets_total=$((sets_v4 + sets_v6))
-          echo "  - Sets: ${sets_total} (v4: ${sets_v4}, v6: ${sets_v6}, missing v6: ${missing_v6})"
-
-          if [ "${missing_v6}" -eq 0 ] && [ "${sets_v6}" -gt 0 ]; then
-            echo "  - IPv6 sets present (external connectivity and drop rules need separate verification)"
-          else
-            echo "  - IPv6 readiness: INCOMPLETE (${missing_v6} jails without an existing IPv6 set (may be created on first ban))"
-          fi
-        else
-          echo "  - Table inet fail2ban-filter: NOT FOUND"
-        fi
-      else
-        echo "Configuration:"
-        echo "  - Fail2Ban not running"
-      fi
-
-      echo
-      echo "Usage:"
-      echo "  f2b help            - Show all commands"
-      echo "  f2b status          - System status"
-      echo "  f2b version --json  - JSON output"
-      echo "  f2b version --short - Short version"
-      ;;
-  esac
+    local mode="${1:---human}"
+    case "$mode" in --json|--short|--human) ;; *) mode=--human ;; esac
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report version --format "${mode#--}" \
+      --version "${VERSION:-unknown}" --release "${RELEASE:-unknown}" --builddate "${BUILD_DATE:-unknown}" \
+      --component "${COMPONENT_NAME:-unknown}" --docker-version "${DOCKER_BLOCK_VERSION:-unknown}"
 }
 
 # f2b_status – rýchly prehľad služieb a jadra konfigurácie
@@ -653,33 +542,8 @@ f2b_status() {
 
 # f2b_audit – jednoduchý audit počtu IP v jailoch
 f2b_audit() {
-  log_header "Fail2Ban Audit"
-  local total=0
-  local clean=0
-
-  for jail in "${JAILS[@]}"; do
-    local count
-    count=$(get_f2b_count "${jail}" all | tr -d ' ')
-    count=${count:-0}
-    if [ "${count}" -eq 0 ]; then
-      log_success "${jail} clean"
-      clean=$((clean + 1))
-    else
-      log_warn    "${jail} ${count} IPs"
-    fi
-    total=$((total + count))
-  done
-
-  echo
-  log_info "Total Jails : ${#JAILS[@]}"
-  log_info "Clean       : ${clean}"
-  log_info "Total IPs   : ${total}"
-
-  if [ "${total}" -eq 0 ]; then
-    log_success "ALL CLEAN!"
-  else
-    log_warn "Active bans: ${total}"
-  fi
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report audit \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 f2b_find() {
@@ -1051,7 +915,7 @@ COMMANDS:
                          - full:     Heavy bidirectional sync (ADD+REMOVE)
                          - validate: Light consistency check (REMOVE only)
                          - default:  validate
-  verify                 Deep verify of F2B ↔ docker-block sync (IPv4 union)
+  verify                 Read-only exact IPv4/IPv6 membership and Docker union
 
 Examples:
   sudo f2b docker dashboard
@@ -1490,65 +1354,8 @@ monitor_jail_log() {
 }
 
 monitor_trends() {
-    log_header "ATTACK TREND ANALYSIS"
-
-    echo ""
-
-    local since1 since6 since24
-    local last_hour last_6h last_24h
-
-    since1="$(date --date='1 hour ago'  '+%Y-%m-%d %H:%M:%S')"
-    since6="$(date --date='6 hours ago' '+%Y-%m-%d %H:%M:%S')"
-    since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
-
-    last_hour="$(
-        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
-          | awk -v since="$since1" '
-              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
-              END{print c+0}
-            '
-    )"
-
-    last_6h="$(
-        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
-          | awk -v since="$since6" '
-              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
-              END{print c+0}
-            '
-    )"
-
-    last_24h="$(
-        zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
-          | awk -v since="$since24" '
-              substr($0,1,19) >= since && $0 ~ /(Ban|Found|Failed|Invalid)/ {c++}
-              END{print c+0}
-            '
-    )"
-
-    # Sanitize numeric values
-    last_hour="$(clean_number "$last_hour")"; [ -z "$last_hour" ] && last_hour=0
-    last_6h="$(clean_number "$last_6h")";     [ -z "$last_6h" ] && last_6h=0
-    last_24h="$(clean_number "$last_24h")";   [ -z "$last_24h" ] && last_24h=0
-
-    echo -e "Last hour: ${YELLOW}$last_hour${NC} attempts"
-    echo -e "Last 6h:   ${YELLOW}$last_6h${NC} attempts"
-    echo -e "Last 24h:  ${YELLOW}$last_24h${NC} attempts"
-    echo ""
-
-    if [ "$last_hour" -gt 50 ] || [ "$last_6h" -gt 1500 ] || [ "$last_24h" -gt 3000 ]; then
-        log_alert "CRITICAL: HIGH ATTACK INTENSITY!"
-        echo ""
-        log_info "Recommended actions:"
-        log_info " • Review logs: f2b monitor jail-log <jail>"
-        log_info " • Check top attackers: f2b monitor top-attackers"
-        log_info " • Consider enabling stricter rules"
-    elif [ "$last_hour" -gt 20 ] || [ "$last_6h" -gt 600 ] || [ "$last_24h" -gt 1500 ]; then
-        log_warn "WARNING: Elevated attack activity"
-    else
-        log_success "Attack levels normal"
-    fi
-
-    echo ""
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report trends \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 
@@ -1557,126 +1364,29 @@ monitor_trends() {
 ################################################################################
 
 report_json() {
-    log_header "JSON EXPORT"
-    local total_bans=0
-    local jail_stats=""
-
-    for jail in "${JAILS[@]}"; do
-        local count
-        count=$(get_f2b_count "$jail" all | tr -d '[:space:]')
-        count=${count:-0}
-        total_bans=$((total_bans + count))
-        jail_stats="${jail_stats} \"${jail}\": ${count},\n"
-    done
-
-    jail_stats=$(echo -e "$jail_stats" | sed '$ s/,$//')
-
-    cat << EOF
-{
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "version": "${VERSION}",
-  "services": {
-    "nftables": "$(service_state nftables)",
-    "fail2ban": "$(service_state fail2ban)",
-    "docker_block": "$(sudo nft list table inet docker-block &>/dev/null && echo "active" || echo "inactive")"
-  },
-  "statistics": {
-    "total_bans": ${total_bans},
-    "jails": {
-$(echo -e "$jail_stats")
-    }
-  },
-  "generated_by": "F2B Wrapper v${VERSION}"
-}
-EOF
-
-    echo ""
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report json \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 report_csv() {
-    log_header "CSV EXPORT"
-    echo "Timestamp,Jail,Banned_IPs,Status"
-
-    for jail in "${JAILS[@]}"; do
-        local count
-        count=$(get_f2b_count "$jail" all | tr -d '[:space:]')
-        count=${count:-0}
-        local status="active"
-        [ "$count" -eq 0 ] && status="clean"
-        echo "$(date +%Y-%m-%d\ %H:%M:%S),${jail},${count},${status}"
-    done
-
-    echo ""
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report csv \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 report_daily() {
-    log_header "DAILY REPORT"
-    echo "Generated: $(date '+%Y-%m-%d %H:%M:%S')"
-    echo ""
-
-    echo "Services:"
-    echo " nftables: $(service_state nftables)"
-    echo " fail2ban: $(service_state fail2ban)"
-    echo ""
-
-    echo "Jail Statistics:"
-    local total=0
-    for jail in "${JAILS[@]}"; do
-        local count
-        count=$(get_f2b_count "$jail" all | tr -d '[:space:]')
-        count=${count:-0}
-        [ "$count" -gt 0 ] && echo " ${jail}: ${count}"
-        total=$((total + count))
-    done
-
-    echo ""
-    echo "Total banned IPs: ${total}"
-    echo ""
-
-    echo "Top 5 Attackers:"
-    if [ -f /var/log/fail2ban.log ]; then
-        grep -h "Ban" /var/log/fail2ban.log 2>/dev/null \
-            | tail -500 \
-            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
-            | sort | uniq -c | sort -rn | head -5 \
-            | awk '{print " " $2 " (" $1 " bans)"}'
-    else
-        echo " (log not available)"
-    fi
-
-    echo ""
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report daily \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 audit_silent() {
-    local LOGFILE="/var/log/f2b-audit.log"
-    local TOTAL=0
-
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Audit started" >> "$LOGFILE"
-    for jail in "${JAILS[@]}"; do
-        local count
-        count=$(get_f2b_count "$jail" all | tr -d '[:space:]')
-        count=${count:-0}
-        TOTAL=$((TOTAL + count))
-        [ "$count" -gt 0 ] && echo " ${jail}: ${count} IPs" >> "$LOGFILE"
-    done
-
-    if [ "$TOTAL" -eq 0 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Status: ALL CLEAN" >> "$LOGFILE"
-    else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Total banned: ${TOTAL}" >> "$LOGFILE"
-    fi
+    local result
+    result=$(sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report audit) || return $?
+    printf '%s\n' "$result" >> /var/log/f2b-audit.log
 }
 
 stats_quick() {
-    local total=0
-    for jail in "${JAILS[@]}"; do
-        local count
-        count=$(get_f2b_count "$jail" all | tr -d '[:space:]')
-        count=${count:-0}
-        total=$((total + count))
-    done
-
-    echo "Total: ${total} | nftables: $(systemctl is-active nftables 2>/dev/null) | fail2ban: $(systemctl is-active fail2ban 2>/dev/null)"
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report stats \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 ################################################################################
@@ -2297,65 +2007,8 @@ security_summary_recommendations() {
 
 
 report_attack_analysis() {
-    local mode="${1:-all}"
-
-    # Create temp file for sharing data between functions
-    local TEMP_DATA="/tmp/f2b-attack-analysis-$$.dat"
-    > "$TEMP_DATA"  # Clear/create file
-
-    log_header "═══════════════════════════════════════════════════════════"
-    log_header "  COMPLETE ATTACK ANALYSIS - NPM + SSH (v025)"
-    log_header "═══════════════════════════════════════════════════════════"
-    echo ""
-
-    # NPM Analysis
-    if [ "$mode" = "all" ] || [ "$mode" = "npm-only" ]; then
-        log_header "═══════════════════════════════════════════════════════════"
-        log_header "  NGINX PROXY MANAGER (NPM) ANALYSIS"
-        log_header "═══════════════════════════════════════════════════════════"
-        echo ""
-
-        analyze_npm_http_status
-        analyze_npm_attack_patterns
-        # Save NPM count to temp file
-        echo "NPM_ATTACKS=${TOTAL_NPM_ATTACKS:-0}" >> "$TEMP_DATA"
-        analyze_probed_paths
-        analyze_top_user_agents_suspicious
-        analyze_top_source_ips_404
-        analyze_top_source_ips_444
-        analyze_top_user_agents_444
-    fi
-
-    # SSH Analysis
-    if [ "$mode" = "all" ] || [ "$mode" = "ssh-only" ]; then
-        log_header "═══════════════════════════════════════════════════════════"
-        log_header "  SSH ATTACK ANALYSIS"
-        log_header "═══════════════════════════════════════════════════════════"
-        echo ""
-
-        analyze_ssh_attacks
-        # Save SSH count to temp file
-        echo "SSH_ATTACKS=${TOTAL_SSH_ATTACKS:-0}" >> "$TEMP_DATA"
-        analyze_ssh_top_attackers
-        analyze_ssh_usernames
-    fi
-
-    # Fail2Ban Status (always)
-    log_header "═══════════════════════════════════════════════════════════"
-    log_header "  FAIL2BAN PROTECTION STATUS"
-    log_header "═══════════════════════════════════════════════════════════"
-    echo ""
-
-    analyze_f2b_current_bans
-    analyze_recent_bans
-        # ✅ PRIDAJ TIMELINE
-    report_attack_timeline
-
-    # Summary (always) - pass temp file path
-    security_summary_recommendations "$TEMP_DATA"
-    
-    # Cleanup
-    rm -f "$TEMP_DATA"
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report analysis --scope "${1:-all}" \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 ################################################################################
@@ -2363,135 +2016,8 @@ report_attack_analysis() {
 ################################################################################
 
 report_attack_timeline() {
-  log_header "╔════════════════════════════════════════════════════════════╗"
-  log_header "║              ATTACK WAVE TIMELINE (Last 24h)               ║"
-  log_header "╚════════════════════════════════════════════════════════════╝"
-  echo
-
-  if [ ! -f /var/log/fail2ban.log ]; then
-    log_warn "Fail2Ban log not found"
-    return 1
-  fi
-
-  echo "Metric: fail2ban.filter ' Found ' events (all attack attempts, including non-banned)"
-  echo
-
-  local -a hours
-  local -a counts
-  local max_count=0
-  local total_count=0
-
-  local TMP_F2B since24
-  TMP_F2B="$(mktemp)" || { log_error "mktemp failed"; return 1; }
-  since24="$(date --date='24 hours ago' '+%Y-%m-%d %H:%M:%S')"
-
-  # Vyrež posledných 24h (rotácia-safe)
-  zcat --force /var/log/fail2ban.log /var/log/fail2ban.log.1 2>/dev/null \
-    | awk -v s="$since24" 'substr($0,1,19) >= s {print}' > "$TMP_F2B"
-
-  # Nazbieraj po hodinách (23h ago .. 0h ago)
-  for i in {23..0}; do
-    local hour_start hour_end attempts_count
-    hour_start="$(date -d "$i hours ago" '+%Y-%m-%d %H:00:00')"
-    hour_end="$(date -d "$i hours ago" '+%Y-%m-%d %H:59:59')"
-
-    attempts_count="$(
-      awk -v s="$hour_start" -v e="$hour_end" '
-        substr($0,1,19) >= s &&
-        substr($0,1,19) <= e &&
-        $0 ~ /fail2ban.filter/ &&
-        $0 ~ / Found / { c++ }
-        END { print c+0 }
-      ' "$TMP_F2B"
-    )"
-    attempts_count="$(clean_number "${attempts_count:-0}")"
-
-    hours+=( "$(date -d "$i hours ago" '+%H:00')" )
-    counts+=( "$attempts_count" )
-
-    total_count=$((total_count + attempts_count))
-    [ "$attempts_count" -gt "$max_count" ] && max_count=$attempts_count
-  done
-
-  cleanup_tmp "$TMP_F2B"
-
-  local avg_count=$((total_count / 24))
-  local bar_width=30
-
-  # --- DISPLAY: 2-hodinové bloky (12 riadkov), stále pokrýva 24h ---
-  # max pre 2h bloky (škálovanie barov)
-  local max_block=0
-  local i idx block_count
-  for i in $(seq 23 -2 1); do
-    idx=$((23 - i))
-    block_count=$(( ${counts[$idx]:-0} + ${counts[$((idx+1))]:-0} ))
-    block_count="$(clean_number "${block_count:-0}")"
-    [ "$block_count" -gt "$max_block" ] && max_block="$block_count"
-  done
-
-  for i in $(seq 23 -2 1); do
-    idx=$((23 - i))
-
-    # Label pre 2h okno
-    local h_start h_end hour_range
-    h_start="$(date -d "$i hours ago" '+%H:00')"
-    h_end="$(date -d "$((i-1)) hours ago" '+%H:59')"
-    hour_range="${h_start}-${h_end}"
-
-    # 2h suma + avg/h (pre level prahy)
-    local count2h count_avg
-    count2h=$(( ${counts[$idx]:-0} + ${counts[$((idx+1))]:-0} ))
-    count2h="$(clean_number "${count2h:-0}")"
-    count_avg=$((count2h / 2))
-
-    local bar_length=0
-    if [ "$max_block" -gt 0 ]; then
-      bar_length=$((count2h * bar_width / max_block))
-    fi
-
-    local bar=""
-    local j
-    for ((j=0; j<bar_width; j++)); do
-      if [ "$j" -lt "$bar_length" ]; then
-        bar+="█"
-      else
-        bar+="░"
-      fi
-    done
-
-    local level="LOW"
-    if [ "$count_avg" -gt 200 ]; then
-      level="CRITICAL"
-    elif [ "$count_avg" -gt 100 ]; then
-      level="HIGH"
-    elif [ "$count_avg" -gt 20 ]; then
-      level="MODERATE"
-    fi
-
-    printf "%s  │ %s  %4s events/2h (%3s/h)  %-10s\n" "$hour_range" "$bar" "$count2h" "$count_avg" "$level"
-  done
-
-  echo
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  printf "Total 24h: %s attempts  |  Average: %s/h  |  Peak: %s/h\n" "$total_count" "$avg_count" "$max_count"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo
-
-  if [ "$max_count" -gt 200 ]; then
-    log_alert "⚠️  CRITICAL WAVE - Peak attack intensity detected!"
-  elif [ "$max_count" -gt 100 ]; then
-    log_warn "HIGH ACTIVITY - Significant attack waves detected"
-  elif [ "$total_count" -gt 1000 ]; then
-    log_info "SUSTAINED ACTIVITY - Continuous attack pattern"
-  else
-    log_success "NORMAL ACTIVITY - Low attack volume"
-  fi
-
-  echo
-  echo "Recommendations:"
-  echo "  • Monitor in real-time: sudo f2b monitor watch"
-  echo "  • Review attackers: sudo f2b monitor top-attackers"
-  echo "  • Check dashboard: sudo f2b docker dashboard"
+    sudo /usr/bin/python3 /usr/local/libexec/f2b-report-filter.py --report timeline \
+      --config "${NPM_REPORT_CONFIG:-/etc/f2b/reporting.ini}" --npm-dir "${NPM_LOG_DIR:-/opt/rustnpm/data/logs}"
 }
 
 ################################################################################
@@ -2532,7 +2058,7 @@ DOCKER:
   docker sync                    # Default: validate
   docker sync validate           # Explicit validate mode
   docker sync full               # Full reconciliation
-  docker verify               Deep verify of F2B ↔ docker-block sync (IPv4 union)
+  docker verify               Read-only exact IPv4/IPv6 membership and Docker union
 
 MANAGE - PORT BLOCKING:
   manage block-port <port>           Block Docker port
@@ -2604,8 +2130,8 @@ main() {
     # Capture one validated active-profile snapshot before any diagnostic output.
     # Disabled jails are not queried; API failures must not become ALL CLEAN.
     case "$1" in
-        status|audit|find|monitor|report|audit-silent|stats-quick|docker)
-            runtime_snapshot || { log_error "Fail2Ban runtime read failed; no successful report generated"; return 1; }
+        status|find|monitor|docker)
+            [ "$1:$2" = "monitor:trends" ] || runtime_snapshot || { log_error "Fail2Ban runtime read failed; no successful report generated"; return 1; }
             ;;
     esac
     mkdir -p "$(dirname "$LOGFILE")"
