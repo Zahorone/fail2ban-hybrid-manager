@@ -9,6 +9,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Generic publication policy self-tests
         run: |
           /usr/bin/python3 scripts/test-publication-safety.py
@@ -128,7 +129,16 @@ jobs:
       - name: Fresh core install with real Fail2Ban and foreign firewall preservation (systemd simulated)
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_fresh_linux.py
       - name: Build and verify complete upgrade archive
-        run: /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py /tmp/f2b-complete-upgrade.tar.gz
+        run: |
+          /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py --integrated /tmp/f2b-complete-upgrade.tar.gz
+          /usr/bin/python3 releases/v0.34/scripts/build-upgrade-package.py --integrated /tmp/f2b-reproducible.tar.gz
+          cmp /tmp/f2b-complete-upgrade.tar.gz /tmp/f2b-reproducible.tar.gz
+      - name: Actual integrated artifact offline inventory and tamper refusals
+        run: /usr/bin/python3 releases/v0.34/tests/test_integrated_bundle.py /tmp/f2b-complete-upgrade.tar.gz --extract-to /tmp/f2b-integrated
+      - name: Integrated archive core fresh (systemd/cron simulated; no reboot)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_fresh_linux.py --bundle "$(find /tmp/f2b-integrated -mindepth 1 -maxdepth 1 -type d)"
+      - name: Integrated archive NPM log-backed fresh (synthetic logs; no Docker packets)
+        run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_fresh_linux.py --bundle "$(find /tmp/f2b-integrated -mindepth 1 -maxdepth 1 -type d)" --npm-profile
       - name: Publication privacy gate (complete archive and manifest)
         run: /usr/bin/python3 scripts/check-publication-safety.py --archive /tmp/f2b-complete-upgrade.tar.gz
       - name: Full legacy upgrade in disposable namespaces (simulated systemd and cron)
@@ -141,3 +151,13 @@ jobs:
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --local-review-fixture
       - name: Pristine v0.33 known-invalid baseline refusal and merged configuration
         run: sudo unshare --mount --net /usr/bin/python3 releases/v0.34/tests/test_full_upgrade_linux.py --pristine
+      - name: Retain exact generic integrated artifact (no logs/backups)
+        uses: actions/upload-artifact@v4
+        with:
+          name: f2b-integrated-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            /tmp/f2b-complete-upgrade.tar.gz
+            /tmp/f2b-complete-upgrade.tar.gz.sha256
+            /tmp/f2b-complete-upgrade.tar.gz.json

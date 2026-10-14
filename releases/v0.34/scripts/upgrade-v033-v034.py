@@ -161,6 +161,8 @@ def verify_package_manifest(root: Path) -> dict:
     if manifest.get("filter_override_policy") != FILTER_OVERRIDE_POLICY:
         raise UpgradeError("Package filter override policy mismatch")
     expected = manifest["files"]
+    if any(p.is_symlink() for p in root.rglob('*')):
+        raise UpgradeError('Package symlinks are forbidden')
     actual = {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
     if actual != set(expected) | {"UPGRADE-MANIFEST.json", "SHA256SUMS"}:
         raise UpgradeError("Package file inventory does not match manifest")
@@ -171,10 +173,14 @@ def verify_package_manifest(root: Path) -> dict:
         path = root / relative
         if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise UpgradeError("Package checksum mismatch: " + name)
+    summed = []
     for line in (root / "SHA256SUMS").read_text().splitlines():
         digest, name = line.split("  ", 1)
         if name not in actual or hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
             raise UpgradeError("Package SHA256SUMS mismatch: " + name)
+        summed.append(name)
+    if len(summed) != len(set(summed)) or set(summed) != actual - {'SHA256SUMS'}:
+        raise UpgradeError('Package SHA256SUMS inventory mismatch')
     return manifest
 
 

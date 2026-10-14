@@ -48,6 +48,11 @@ not a full reinstall. This does not change filters, bans or local reporting.ini.
 
 ## Releases
 
+For one self-contained development validation payload (separate fresh/upgrade
+entrypoints, offline compatibility inventory and VM acceptance gates), see
+[integrated bundle validation](releases/v0.34/docs/INTEGRATED-VALIDATION.md).
+The complete new archive is not VM-certified by historical per-hotfix results.
+
 - **v0.34-dev** — current development baseline: transactional upgrade/rollback,
   dual-stack/Docker regressions, conservative filters, reporting and mail fixes.
 - **v0.33** — historical PHP Error Detection & Docker Auto-Sync package.
