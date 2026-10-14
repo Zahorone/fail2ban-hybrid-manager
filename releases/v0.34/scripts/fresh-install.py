@@ -15,6 +15,8 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
+
 ROOT = Path('/')
 SOURCE = Path(__file__).resolve().parents[1]
 CORE = ('nftables', 'fail2ban', 'python3', 'cron', 'iproute2', 'util-linux',
@@ -333,6 +335,8 @@ def main():
     parser.add_argument('--mail-to', help='select mail dependencies/actions; configure MTA separately')
     args = parser.parse_args()
     try:
+        if (SOURCE / 'UPGRADE-MANIFEST.json').exists():
+            load_upgrade().validate_package(SOURCE, load_upgrade().install_map(SOURCE))
         if os.geteuid() != 0:
             raise FreshError('Run with sudo')
         if args.check and (args.apply or args.install_prerequisites):

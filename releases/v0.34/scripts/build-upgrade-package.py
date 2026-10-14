@@ -12,7 +12,18 @@ import tarfile
 import tempfile
 
 
-def build(output):
+INTEGRATED_FILES = (
+    'INSTALL-ALL-v034.sh', 'scripts/fresh-install.py',
+    'scripts/01-install-nftables-v034.sh', 'scripts/04-install-docker-block-v034.sh',
+    'scripts/verify-integrated-bundle.py', 'config/jail.local',
+    'config/nginx-recon-optimized.local', 'config/f2b-anomaly-detection.local',
+    'docs/INTEGRATED-VALIDATION.md', 'docs/FRESH-INSTALL.md', 'docs/DOCKER-NPM-LAB.md',
+    'docs/REPORTING-ONLY-HOTFIX.md', 'examples/docker-npm-lab/compose.json',
+    'examples/docker-npm-lab/compose.ipv6.json',
+)
+
+
+def build(output, integrated=False):
     root = Path(__file__).resolve().parents[1]
     repo = root.parents[1]
     def git(*args):
@@ -31,6 +42,9 @@ def build(output):
     files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py',
              root / 'docs/UPGRADE-v033-v034.md', root / 'docs/MODULE-ARCHITECTURE.md',
              root / 'docs/ACCESS-FILTER-SAFETY.md'}
+    if integrated:
+        files.update(root / name for name in INTEGRATED_FILES)
+        files.update((root / 'actions').glob('*.local'))
     for source in files:
         relative = str(source.relative_to(repo))
         if git('hash-object', relative) != git('rev-parse', 'HEAD:' + relative):
@@ -59,8 +73,14 @@ def build(output):
                 'targets': {str(p): str(s.relative_to(root)) for p, s in sorted(mapping.items())},
                 'generated_targets': ['/etc/nftables.conf', '/etc/nftables.d/fail2ban-filter.nft', '/etc/nftables.d/docker-block.nft'],
                 'optional_application_hardening': 'not included'}
+    if integrated:
+        manifest['bundle'] = {'kind': 'integrated-development-validation',
+            'fresh_entrypoint': 'INSTALL-ALL-v034.sh', 'upgrade_entrypoint': 'scripts/upgrade-v033-v034.py',
+            'required_files': sorted(INTEGRATED_FILES + tuple(str(p.relative_to(root)) for p in (root / 'actions').glob('*.local'))),
+            'vm_acceptance': 'pending; namespace CI is not boot/packet evidence',
+            'runtime_git_required': False}
     with tempfile.TemporaryDirectory(prefix='f2b-upgrade-build-') as directory:
-        package = Path(directory) / ('f2b-upgrade-v033-v034-' + commit[:7])
+        package = Path(directory) / (('f2b-integrated-v034-dev-' if integrated else 'f2b-upgrade-v033-v034-') + commit[:7])
         package.mkdir()
         for source in sorted(files):
             target = package / source.relative_to(root)
@@ -91,11 +111,18 @@ def build(output):
                     data = path.read_bytes()
                     info.size, info.mode = len(data), 0o644
                     archive.addfile(info, io.BytesIO(data))
-    print(json.dumps({'commit': commit, 'archive': str(output.resolve()), 'bytes': output.stat().st_size,
-                      'sha256': hashlib.sha256(output.read_bytes()).hexdigest()}, indent=2))
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    receipt = {'commit': commit, 'archive_name': output.name, 'bytes': output.stat().st_size,
+               'sha256': digest, 'release': module.RELEASE, 'integrated': integrated}
+    if integrated:
+        output.with_name(output.name + '.sha256').write_text(digest + '  ' + output.name + '\n')
+        output.with_name(output.name + '.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+    print(json.dumps(receipt, indent=2))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    build(parser.parse_args().output)
+    parser.add_argument('--integrated', action='store_true', help='include complete fresh and upgrade validation entrypoints')
+    args = parser.parse_args()
+    build(args.output, integrated=args.integrated)

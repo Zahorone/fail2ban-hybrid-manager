@@ -11,7 +11,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
+import datetime as dt
+
+sys.dont_write_bytecode = True
 
 assert os.geteuid() == 0
 assert os.readlink('/proc/self/ns/net') != os.readlink('/proc/1/ns/net'), 'Require unshare --net'
@@ -30,6 +34,10 @@ run('mount', '-t', 'tmpfs', 'tmpfs', '/run')
 Path('/run/lock').mkdir()
 Path('/run/fail2ban').mkdir()
 source = Path(__file__).resolve().parents[1]
+artifact = '--bundle' in sys.argv
+if artifact:
+    source = Path(sys.argv[sys.argv.index('--bundle') + 1]).resolve()
+    run('/usr/bin/python3', str(source / 'scripts/verify-integrated-bundle.py'))
 spec = importlib.util.spec_from_file_location('fresh', source / 'scripts/fresh-install.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
@@ -81,8 +89,21 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
     from argparse import Namespace
     args = Namespace(ssh=False, ssh_port=22, docker=False, mail_to=None,
                      npm_log_dir=None, bootstrap_stock_nft=True)
+    if artifact and '--npm-profile' in sys.argv:
+        args.npm_log_dir = Path('/opt/synthetic-npm/logs'); args.npm_log_dir.mkdir(parents=True)
+        for name in ('proxy-host-1_access.log', 'proxy-host-1_error.log', 'fallback_http_access.log'):
+            (args.npm_log_dir / name).touch()
+        # A private local reporting path is an explicit input, never inferred
+        # from trusted probes or overwritten by installation.
+        reporting_input = Path('/etc/f2b/reporting.ini')
+        reporting_input.write_text('[reporting]\nnpm_log_dir = ' + str(args.npm_log_dir) + '\n')
+        reporting_bytes = reporting_input.read_bytes()
+        stamp = dt.datetime.now(dt.timezone.utc).strftime('%d/%b/%Y:%H:%M:%S %z')
+        (args.npm_log_dir / 'proxy-host-1_access.log').write_text('[' + stamp + '] - 200 200 - GET https app.example.invalid "/" [Client 192.0.2.10]\n')
     selected = m.policy(args)
-    assert selected[1] == ['recidive', 'manualblock']
+    assert set(selected[1]) >= {'recidive', 'manualblock'}
+    if args.npm_log_dir: assert len(selected[1]) > 2
+    else: assert selected[1] == ['recidive', 'manualblock']
     m.file_guards()
     try:
         m.install(args, before, selected)
@@ -99,7 +120,25 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
         run('/usr/bin/python3', '/usr/local/libexec/f2b-runtime-verify.py', '--docker-check')
         run('bash', '/usr/local/bin/f2b', 'sync', 'check')
         audit = run('bash', '/usr/local/bin/f2b', 'audit').stdout
-        assert set(json.loads(audit)['jails']) == {'manualblock', 'recidive'}
+        assert set(json.loads(audit)['jails']) == set(selected[1])
+        if artifact:
+            run('bash', '/usr/local/bin/f2b', 'docker', 'verify')
+            assert 'FOUND TIMELINE' in run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis').stdout
+            assert run('bash', '/usr/local/bin/f2b', 'report', 'attack-analysis', 'short').stdout.startswith('Reporting schema 2;')
+            artifact_report = json.loads(run('bash', '/usr/local/bin/f2b', 'report', 'json').stdout)
+            if args.npm_log_dir:
+                assert reporting_input.read_bytes() == reporting_bytes
+                assert artifact_report['http_window']['parsed_records'] == 1
+            run('bash', '/usr/local/bin/f2b', 'manage', 'block-port', '12345')
+            assert '12345' in Path('/etc/nftables.d/docker-block.nft').read_text()
+            run('unshare', '--net', 'nft', '-f', '/etc/nftables.conf')
+            assert m.load_upgrade().external_nft_digest(before) == m.load_upgrade().external_nft_digest(json.loads(run('nft', '-j', 'list', 'ruleset').stdout))
+            run('bash', '/usr/local/bin/f2b', 'manage', 'unblock-port', '12345')
+            try: m.file_guards()
+            except m.FreshError: pass
+            else: raise AssertionError('Fresh bundle rerun was accepted')
+            print('PASS: integrated artifact fresh profile, ping/readiness, exact diagnostics, reports, ports, cold include load and foreign rules; systemd/cron simulated, NO VM/reboot/Docker packets')
+            raise SystemExit(0)
         # Reconstruct the exact known partial legacy payload, retaining live bans.
         recovery_spec = importlib.util.spec_from_file_location('recovery', source / 'scripts/recover-fresh.py')
         recovery = importlib.util.module_from_spec(recovery_spec); recovery_spec.loader.exec_module(recovery)

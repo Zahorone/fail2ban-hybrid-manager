@@ -15,6 +15,8 @@ import tempfile
 import time
 import sys
 import re
+import sqlite3
+import datetime as dt
 from scan_review_fixture import overrides
 from unittest.mock import patch
 
@@ -80,6 +82,12 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     # Synthetic, independent site override must survive every transaction.
     site = Path('/etc/fail2ban/filter.d/site-preserved.local')
     site.write_text('[Definition]\n# namespace fixture only\n')
+    whitelist = Path('/etc/fail2ban/jail.d/98-synthetic-whitelist.local')
+    whitelist.write_text('[DEFAULT]\nignoreip = 127.0.0.0/8 ::1 192.0.2.123 2001:db8::123\n[manualblock]\nbantime = 7200\n')
+    whitelist_before = whitelist.read_bytes()
+    reporting_config = Path('/etc/f2b/reporting.ini')
+    reporting_config.write_text('[reporting]\nfail2ban_timezone = UTC\nsample_limit = 10\n')
+    reporting_before = reporting_config.read_bytes()
     is_dev = '--v034dev' in sys.argv
     if is_dev:
         spec = importlib.util.spec_from_file_location('baseline_v034', script)
@@ -103,7 +111,22 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     apache_link.symlink_to(apache)
     apache_before = apache.read_bytes()
 
+    saved_expiry = {}
     def assert_site_protections():
+        for (family, name), contents in foreign_additional.items():
+            assert run('nft', '-s', 'list', 'table', family, name).stdout == contents
+        if saved_expiry:
+            records = json.loads(run('/usr/bin/python3', str(package / 'scripts/f2b-ipv6-sync.py'), 'export').stdout)['manualblock']
+            ends = {line.split()[0]: dt.datetime.strptime(line.rsplit(' = ', 1)[1], '%Y-%m-%d %H:%M:%S').timestamp() for line in records}
+            assert all(address in ends and abs(ends[address] - expiry) <= 2 for address, expiry in saved_expiry.items()), 'Ban expiry reset/shortened'
+        assert whitelist.read_bytes() == whitelist_before
+        assert reporting_config.read_bytes() == reporting_before
+        database = Path('/var/lib/fail2ban/fail2ban.sqlite3')
+        if database.exists():
+            # sqlite's context manager ends a transaction; it does NOT close
+            # the handle, which otherwise pins our private DB mount at cleanup.
+            with contextlib.closing(sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True)) as connection:
+                assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert all(path.read_bytes() == contents for path, contents in preserved_overrides.items())
         assert apache.read_bytes() == apache_before and apache_link.is_symlink() and apache_link.resolve() == apache
         if not preserved_overrides: return
@@ -163,6 +186,12 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     run('nft', 'add', 'chain', 'ip', 'foreign-nat', 'prerouting', '{ type nat hook prerouting priority dstnat; }')
     run('nft', 'add', 'rule', 'ip', 'foreign-nat', 'prerouting', 'tcp', 'dport', '8080', 'dnat', 'to', '192.0.2.90:80')
     foreign = run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
+    for family, name in (('ip', 'DOCKER'), ('inet', 'synthetic-ufw')):
+        run('nft', 'add', 'table', family, name)
+        run('nft', 'add', 'chain', family, name, 'sentinel')
+        run('nft', 'add', 'rule', family, name, 'sentinel', 'tcp', 'dport', '12345', 'accept')
+    foreign_additional = {(family, name): run('nft', '-s', 'list', 'table', family, name).stdout
+                          for family, name in (('ip', 'DOCKER'), ('inet', 'synthetic-ufw'))}
     for table, names in (('fail2ban-filter', ('f2b-recidive', 'f2b-recidive-v6')),
                          ('docker-block', ('docker-banned-ipv4', 'docker-banned-ipv6'))):
         run('nft', 'add', 'table', 'inet', table)
@@ -199,11 +228,23 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         for ip in ('192.0.2.8', '2001:db8::8'):
             run('fail2ban-client', 'set', 'manualblock', 'banip', ip)
         wait(lambda: '2001:db8::8' in run('fail2ban-client', 'get', 'manualblock', 'banip').stdout)
+        records = json.loads(run('/usr/bin/python3', str(package / 'scripts/f2b-ipv6-sync.py'), 'export').stdout)['manualblock']
+        saved_expiry.update({line.split()[0]: dt.datetime.strptime(line.rsplit(' = ', 1)[1], '%Y-%m-%d %H:%M:%S').timestamp() for line in records})
         command = ['/usr/bin/python3', str(script)]
         if '--local-review-fixture' in sys.argv:
             refused = run(*command, check=False)
             assert refused.returncode != 0 and 'unknown local contents' in refused.stderr
             command += ['--local-review', str(private_review)]
+        managed = Path('/usr/local/bin/f2b'); original_managed = managed.read_bytes()
+        alias = temporary / 'synthetic-wrapper'; alias.write_bytes(original_managed)
+        managed.unlink(); managed.symlink_to(alias)
+        refused = run(*command, check=False)
+        assert refused.returncode != 0 and 'symlink' in refused.stderr
+        managed.unlink(); managed.write_bytes(original_managed); managed.chmod(0o755)
+        managed.write_bytes(original_managed + b'\n# unknown synthetic edit\n')
+        refused = run(*command, check=False)
+        assert refused.returncode != 0 and 'unknown local contents' in refused.stderr
+        managed.write_bytes(original_managed)
         conflict = Path('/etc/fail2ban/filter.d/f2b-exploit-critical.local')
         original_conflict = conflict.read_bytes() if conflict.exists() else None
         conflict.write_text('[Definition]\nignoreregex = .*\n')
