@@ -5,6 +5,25 @@ This baseline is not `v0.34-rc1` or final v0.34. Test installation and recovery
 on disposable supported Linux hosts before any approved canary apply.
 Green namespace CI is not a production or reboot certification.
 
+## 📊 Terminal report styles
+
+`sudo f2b report attack-analysis` displays the graphical schema-2 report with
+sections, bounded-sample top paths/candidates, typed ban events and a UTC timeline.
+`sudo f2b report attack-analysis short` retains the compact summary. Both accept
+one `--npm-only` or `--ssh-only` flag; `short` and the scope may occur in either
+order. Unknown or duplicate arguments fail, rather than silently changing scope.
+
+```sh
+sudo f2b report attack-analysis --npm-only
+sudo f2b report attack-analysis short --ssh-only
+```
+
+The current ban snapshot and explicitly labelled all-jail event/timeline sections
+remain global in either scope; the scope selects the HTTP/SSH-specific sections.
+Query values are omitted from top paths, terminal controls are escaped, and ANSI
+colors are TTY-only (`NO_COLOR` and `TERM=dumb` disable them). JSON/CSV remain pure
+machine output. See [scoped reporting upgrade](REPORTING-ONLY-HOTFIX.md).
+
 ## 🛡️ What's new
 
 - Fail2Ban's upstream family-aware `nftables-multiport` shim selects IPv4/IPv6

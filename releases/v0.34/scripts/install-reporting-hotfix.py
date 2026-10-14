@@ -19,6 +19,7 @@ transaction.CHECKER = Path('/usr/local/libexec/f2b-report-filter.py')
 FUNCTIONS = ('f2b_version', 'f2b_audit', 'report_json', 'report_csv', 'report_daily',
              'audit_silent', 'stats_quick', 'report_attack_analysis', 'report_attack_timeline', 'monitor_trends')
 LEGACY = 'dc78f8bf022c850368602e434cc0e0744861c7e1'
+REPORTING_BASELINE = '7e41be127a5d159f12c656fbc0ab5ea7123df831'
 
 
 def function(text, name):
@@ -45,6 +46,15 @@ def route_main(body):
                   'release_lock\n' + m[2] + 'return "$report_result"\n' + m[3], body, count=1)
     if 'local report_result=$?' not in body or 'return "$report_result"' not in body:
         raise transaction.HotfixError('Unrecognized report routing; refusing to mask report failures')
+    old_analysis = '''                case "$3" in
+                    --npm-only) report_attack_analysis "npm-only" ;;
+                    --ssh-only) report_attack_analysis "ssh-only" ;;
+                    *)          report_attack_analysis "all" ;;
+                esac'''
+    if old_analysis in body:
+        body = body.replace(old_analysis, '                report_attack_analysis "${@:3}"', 1)
+    if body.count('report_attack_analysis "${@:3}"') != 1:
+        raise transaction.HotfixError('Unrecognized analysis argument routing')
     return body
 
 
@@ -72,6 +82,15 @@ def wrapper_source(original):
         for old in ('Deep verify of F2B ↔ docker-block sync (IPv4 union)',
                     'Read-only exact IPv4/IPv6 membership and Docker union'):
             patched = patched.replace(old, label)
+        if name == 'show_help':
+            old_help = '  report attack-analysis [--npm-only|--ssh-only]\n                                     Complete attack analysis'
+            new_help = ('  report attack-analysis [--npm-only|--ssh-only]\n'
+                        '                                     Full graphical terminal report (24h)\n'
+                        '  report attack-analysis short [--npm-only|--ssh-only]\n'
+                        '                                     Compact schema-2 summary (short/scope in either order)')
+            patched = patched.replace(old_help, new_help, 1)
+            if new_help not in patched:
+                raise transaction.HotfixError('Unrecognized analysis help; refusing stale CLI guidance')
         updated = updated.replace(body, patched, 1)
     # Prove exact preservation of every other function/constant/port/diagnostic.
     before, after = original, updated
@@ -88,9 +107,10 @@ def plan():
     helper = SOURCE / 'scripts/f2b-report-filter.py'
     expected = helper.read_bytes(); compile(expected, str(helper), 'exec')
     if transaction.CHECKER.exists():
-        prior = transaction.run('git', '-C', str(SOURCE.parents[1]), 'show',
-                                LEGACY + ':releases/v0.34/scripts/f2b-report-filter.py').encode()
-        if transaction.CHECKER.read_bytes() not in (prior, expected):
+        known = [transaction.run('git', '-C', str(SOURCE.parents[1]), 'show',
+                                revision + ':releases/v0.34/scripts/f2b-report-filter.py').encode()
+                 for revision in (LEGACY, REPORTING_BASELINE)]
+        if transaction.CHECKER.read_bytes() not in (*known, expected):
             raise transaction.HotfixError('Unknown local reporting helper; preserve/review before overwrite')
     transaction.run('/usr/bin/python3', '-c', 'from zoneinfo import ZoneInfo; from fail2ban.client.csocket import CSocket')
     original = transaction.WRAPPER.read_bytes().decode('utf-8')
