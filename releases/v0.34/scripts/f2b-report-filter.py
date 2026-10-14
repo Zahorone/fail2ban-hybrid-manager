@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -376,9 +377,8 @@ def full_human(report, scope='all', color=False):
     lines = []
     def row(text=''):
         text = terminal_text(text)
-        while len(text) > width - 4:
-            lines.append('│ ' + text[:width - 4] + ' │'); text = text[width - 4:]
-        lines.append('│ ' + text.ljust(width - 4) + ' │')
+        for part in textwrap.wrap(text, width - 4, break_on_hyphens=False, replace_whitespace=False) or ['']:
+            lines.append('│ ' + part.ljust(width - 4) + ' │')
     def section(title):
         lines.append('├' + '─' * (width - 2) + '┤')
         row(title)
