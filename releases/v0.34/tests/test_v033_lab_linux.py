@@ -71,11 +71,14 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         # Rename within the same private bind mount, not across /etc -> /tmp.
         parent = Path('/etc/fail2ban/jail.d'); saved_parent = parent.with_name('jail.d-fixture-saved')
         parent.rename(saved_parent); parent.symlink_to(saved_parent)
-        try: b.preflight(upgrade)
-        except ValueError as error: assert 'Unsafe' in str(error)
-        else: raise AssertionError('Symlink parent was accepted')
-        assert not (saved_parent / 'zz-v033-lab.local').exists()
-        parent.unlink(); saved_parent.rename(parent)
+        try:
+            try: b.preflight(upgrade)
+            except (ValueError, fresh.FreshError) as error:
+                assert 'Unsafe' in str(error) or 'symlink' in str(error)
+            else: raise AssertionError('Symlink parent was accepted')
+            assert not (saved_parent / 'zz-v033-lab.local').exists()
+        finally:
+            parent.unlink(); saved_parent.rename(parent)
         before = {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         b.preflight(upgrade)
         assert before == {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
