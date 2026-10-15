@@ -42,8 +42,14 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     lab = next((directory / 'lab').iterdir()); upgrade = next((directory / 'upgrade').iterdir())
     assert hashlib.sha256(Path('/tmp/f2b-pinned1964/f2b-complete-upgrade.tar.gz').read_bytes()).hexdigest() == '271ca3d229bbe5cacebba2c48bb6fb0069d1ff9d52aaedaf7adaffd949635bbb'
     private_etc = directory / 'etc'; shutil.copytree('/etc', private_etc, symlinks=True); run('mount', '--bind', str(private_etc), '/etc')
-    for name in ('/usr/local', '/var/log', '/var/lib/fail2ban', '/var/backups', '/opt'):
-        clone = directory / 'root' / name.lstrip('/'); clone.mkdir(parents=True); Path(name).mkdir(parents=True, exist_ok=True); run('mount', '--bind', str(clone), name)
+    for name in ('/usr/local', '/var/log', '/var/lib', '/var/backups', '/opt'):
+        clone = directory / 'root' / name.lstrip('/'); clone.mkdir(parents=True)
+        if name == '/var/lib':
+            # Preserve package metadata for dpkg-query, but isolate ALL lab state,
+            # including the private mail sink, from the runner filesystem.
+            shutil.copytree('/var/lib/dpkg', clone / 'dpkg', symlinks=True)
+            (clone / 'fail2ban').mkdir()
+        Path(name).mkdir(parents=True, exist_ok=True); run('mount', '--bind', str(clone), name)
     stock = '#!/usr/sbin/nft -f\nflush ruleset\ntable inet filter {\n' + ''.join(' chain ' + name + ' { type filter hook ' + name + ' priority filter; }\n' for name in ('input', 'forward', 'output')) + '}\n'
     Path('/etc/nftables.conf').write_text(stock)
     stubs = directory / 'bin'; stubs.mkdir()
