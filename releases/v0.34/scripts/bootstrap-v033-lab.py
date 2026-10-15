@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = '196400970b669f8fd43eebadad3b971125de857e'
 PRIVATE_LOGS = Path('/var/lib/f2b-v033-lab/logs')
 CANONICAL_LOGS = ('fail2ban.log', 'fail2ban-blocked-ips.txt', 'f2b-docker-sync.log', 'f2b-wrapper.log')
+SCOPED_CONFIG = '# Synthetic v0.33 lab: scoped includes only\ninclude "/etc/nftables.d/fail2ban-filter.nft"\ninclude "/etc/nftables.d/docker-block.nft"\n'
 MAIL_SINK = ('# Synthetic lab only: preserve the real binary-safe mail action,\n'
              '# but consume its output locally and never query external whois.\n'
              '[Definition]\n_whois_command = printf %%b "Synthetic lab: external whois disabled\\n"\n'
@@ -236,7 +238,7 @@ def apply(bundle):
     for table in ('fail2ban-filter', 'docker-block'):
         (Path('/etc/nftables.d') / (table + '.nft')).write_text(run('nft', '-s', 'list', 'table', 'inet', table))
     # Replace only the verified stock persistence file; NEVER execute/load it.
-    Path('/etc/nftables.conf').write_text('# Synthetic v0.33 lab: scoped includes only\ninclude "/etc/nftables.d/fail2ban-filter.nft"\ninclude "/etc/nftables.d/docker-block.nft"\n')
+    Path('/etc/nftables.conf').write_text(SCOPED_CONFIG)
     run('fail2ban-client', '-t'); run('systemctl', 'enable', '--now', 'cron'); run('systemctl', 'start', 'fail2ban')
     fresh.wait_ready(enabled)
     run('systemctl', 'restart', 'fail2ban'); fresh.wait_ready(enabled)
@@ -248,22 +250,96 @@ def apply(bundle):
     run('/usr/bin/python3', str(bundle / 'scripts/upgrade-v033-v034.py'))
     Path('/etc/f2b/v033-lab.state').write_text('complete; synthetic only; upgrade preflight passed\n')
     print('PASS: synthetic baseline restarted, canonical bytes intact, exact 1964009 upgrade preflight passed; no global firewall load')
+    print('RUNTIME ONLY: boot is NOT accepted. Prepare boot explicitly, reboot, then --check-boot before upgrade.')
+
+
+def boot_id(): return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+
+
+def boot_helper(): return load('lab_boot_contract', ROOT / 'scripts/boot-contract.py')
+
+
+def prepare_boot(bundle):
+    inventory()
+    marker = Path('/etc/f2b/v033-lab.state'); safe(marker)
+    if not marker.is_file() or not marker.read_text().startswith('complete;'):
+        raise ValueError('Only a complete synthetic baseline can prepare boot')
+    for target, source in mapping().items():
+        safe(target)
+        if target.read_bytes() != source.read_bytes(): raise ValueError('Prepare boot BEFORE upgrade; canonical baseline mismatch: ' + str(target))
+    safe(Path('/etc/nftables.conf'))
+    if Path('/etc/nftables.conf').read_text() != SCOPED_CONFIG:
+        raise ValueError('Refusing foreign/modified global loader; exact synthetic two-owned-includes config required')
+    # Only a stock vendor unit on the separately confirmed disposable baseline.
+    for unit in ('nftables', 'fail2ban', 'cron'):
+        custom = Path('/etc/systemd/system') / (unit + '.service')
+        folder = custom.with_name(unit + '.service.d'); safe(custom); safe(folder)
+        if custom.exists() or (folder.exists() and any(folder.iterdir())):
+            raise ValueError('Existing custom systemd unit/drop-in requires review: ' + str(custom))
+        if run('systemctl', 'show', unit + '.service', '--property=DropInPaths', '--value').strip():
+            raise ValueError('Unreviewed vendor/runtime drop-ins: ' + unit)
+    fragment = Path(run('systemctl', 'show', 'nftables.service', '--property=FragmentPath', '--value').strip())
+    if not fragment.is_absolute() or not str(fragment).startswith(('/usr/lib/systemd/system/', '/lib/systemd/system/')):
+        raise ValueError('Unrecognized nftables vendor unit')
+    # /lib may be the distro /usr merge symlink. Resolve only this vendor path.
+    fragment = fragment.resolve(); safe(fragment)
+    if not re.search(r'^ExecStart=/usr/sbin/nft -f /etc/nftables.conf\s*$', fragment.read_text(), re.M):
+        raise ValueError('Unrecognized vendor nftables ExecStart; no enable attempted')
+    for table in ('fail2ban-filter', 'docker-block'): safe(Path('/etc/nftables.d') / (table + '.nft'))
+    # Check/load syntax only in a new net namespace, never the live firewall.
+    run('unshare', '--net', 'nft', '-c', '-f', '/etc/nftables.conf')
+    helper = boot_helper(); original = helper.enabled_states(run)
+    if any(state not in {'enabled', 'disabled'} for state in original.values()):
+        raise ValueError('Masked/static/custom lab service state requires review')
+    before = run('nft', '-j', 'list', 'ruleset')
+    safe(Path('/var/backups'))
+    backup = Path(tempfile.mkdtemp(prefix='f2b-lab-boot-', dir='/var/backups')); backup.chmod(0o700)
+    (backup / 'unit-enabled-states.json').write_text(json.dumps(original, sort_keys=True) + '\n')
+    print('Private boot-preparation backup:', backup)
+    nft_dropin = ('[Unit]\nBefore=fail2ban.service cron.service\n[Service]\nExecStop=\nExecReload=\nExecReload=/bin/false\n')
+    consumer_dropin = '[Unit]\nRequires=nftables.service\nAfter=nftables.service\n'
+    for unit in ('nftables', 'fail2ban', 'cron'):
+        folder = Path('/etc/systemd/system') / (unit + '.service.d'); folder.mkdir(exist_ok=True)
+        with (folder / '10-f2b-lab-boot.conf').open('x') as stream:
+            stream.write(nft_dropin if unit == 'nftables' else consumer_dropin)
+    run('systemctl', 'daemon-reload')
+    # Enable only: NO --now, start/restart/reload nftables or global live load.
+    for unit in helper.UNITS: run('systemctl', 'enable', unit)
+    helper.check(run, runtime=False)
+    if before != run('nft', '-j', 'list', 'ruleset'):
+        raise ValueError('Runtime changed during boot preparation; retain snapshot/backup and review')
+    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
+    with state.open('x') as stream:
+        json.dump({'prepared_boot_id': boot_id(), 'original_enabled': original, 'backup': str(backup)}, stream)
+    print('PREPARED, NOT BOOT ACCEPTED: real reboot required, then --check-boot. No live nftables load/start performed.')
+
+
+def check_boot():
+    inventory()
+    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
+    saved = json.loads(state.read_text())
+    if saved['prepared_boot_id'] == boot_id(): raise ValueError('Real reboot required since explicit boot preparation')
+    boot_helper().check(run)
+    print('PASS: post-reboot boot gate; inspect boot journal and both-family enforcement separately; not packet acceptance')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('--upgrade-bundle', type=Path, required=True)
     mode = parser.add_mutually_exclusive_group(); mode.add_argument('--check', action='store_true'); mode.add_argument('--apply', action='store_true')
+    mode.add_argument('--prepare-boot', action='store_true'); mode.add_argument('--check-boot', action='store_true')
     parser.add_argument('--snapshot-confirmed', action='store_true', help='operator confirms separate disposable clean snapshot')
     args = parser.parse_args()
     try:
         if os.geteuid() != 0: raise ValueError('Run with sudo')
-        if args.apply and not args.snapshot_confirmed: raise ValueError('Apply requires --snapshot-confirmed on a disposable VM')
-        if args.apply: apply(args.upgrade_bundle.resolve())
+        if (args.apply or args.prepare_boot) and not args.snapshot_confirmed: raise ValueError('Mutation requires --snapshot-confirmed on a disposable VM')
+        if args.prepare_boot: prepare_boot(args.upgrade_bundle.resolve())
+        elif args.check_boot: check_boot()
+        elif args.apply: apply(args.upgrade_bundle.resolve())
         else: preflight(args.upgrade_bundle.resolve())
         return 0
     except Exception as error:
         print('REFUSED/FAILED:', error, file=sys.stderr)
-        if args.apply: print('Do not rerun/flush; retain backup and restore the clean VM snapshot after review', file=sys.stderr)
+        if args.apply or args.prepare_boot: print('Do not rerun/flush; retain backup and restore the clean VM snapshot after review', file=sys.stderr)
         return 1
 
 

@@ -39,7 +39,7 @@ def build(output, integrated=False):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     mapping = module.install_map(root)
-    files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py',
+    files = set(mapping.values()) | {root / 'VERSION', root / 'scripts/upgrade-v033-v034.py', root / 'scripts/boot-contract.py',
              root / 'docs/UPGRADE-v033-v034.md', root / 'docs/MODULE-ARCHITECTURE.md',
              root / 'docs/ACCESS-FILTER-SAFETY.md'}
     if integrated:

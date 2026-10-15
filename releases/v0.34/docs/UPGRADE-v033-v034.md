@@ -166,3 +166,13 @@ Existing v0.34-dev live canary is separate evidence; IPv6 was not active
 there. Keep its 24-48 hour observation window. No other production host is in
 scope for this package preparation. A representative disposable v0.33 VM upgrade/rollback,
 reboot persistence and external IPv6 test remain mandatory before broad rollout.
+# Boot prerequisite (fail closed)
+
+Current preflight also requires persistently enabled, active nftables/Fail2Ban/cron,
+no pending daemon-reload, both Requires= and After=nftables.service for consumers,
+and all four timed family infra sets. It refuses without enabling/starting/loading
+any firewall. Custom boot arrangements require explicit review; do not blindly
+enable nftables. New backups record/restore exact enabled states without --now or
+firewall restart. Legacy backups without that metadata are explicitly identified.
+Namespace systemd simulations are not reboot acceptance. The immutable 1964009
+artifact has not been modified to add this gate.

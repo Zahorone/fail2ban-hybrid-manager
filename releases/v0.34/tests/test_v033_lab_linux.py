@@ -54,6 +54,14 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     Path('/etc/nftables.conf').write_text(stock)
     stubs = directory / 'bin'; stubs.mkdir()
     (stubs / 'systemctl').write_text('#!/bin/sh\ncase "$*" in\n'
+        'show*--property=UnitFileState*) echo enabled;;\n'
+        'show*--property=NeedDaemonReload*) echo no;;\n'
+        'show*--property=ActiveState*) echo active;;\n'
+        'show*--property=Requires*|show*--property=After*) echo nftables.service;;\n'
+        'show*--property=ExecStart*) echo "/usr/sbin/nft -f /etc/nftables.conf";;\n'
+        'show*--property=DropInPaths*) echo;;\n'
+        'show*--property=FragmentPath*) echo /usr/lib/systemd/system/nftables.service;;\n'
+        '"enable nftables.service"|"enable fail2ban.service"|"enable cron.service") exit 0;;\n'
         '"stop fail2ban") fail2ban-client stop >/dev/null 2>&1; exit 0;;\n'
         '"start fail2ban") exec fail2ban-client -x start;;\n'
         '"restart fail2ban") fail2ban-client stop >/dev/null 2>&1; exec fail2ban-client -x start;;\n'
@@ -170,6 +178,13 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
             time.sleep(.1)
         else: raise AssertionError('Genuine mail action did not reach local-only sink')
         run('fail2ban-client', 'set', 'nginx-php-errors', 'unbanip', '192.0.2.18')
+        # Namespace simulation only: prepare enables without live nft loading;
+        # it MUST NOT report a real reboot acceptance in the same kernel boot.
+        b.prepare_boot(upgrade)
+        try: b.check_boot()
+        except ValueError as error: assert 'Real reboot required' in str(error)
+        else: raise AssertionError('Namespace provisioning claimed real reboot acceptance')
+        prepared_states = b.boot_helper().enabled_states(b.run)
         canonical = {target: target.read_bytes() for target in b.mapping()}
         policy = Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes()
         sink = Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes()
@@ -179,6 +194,8 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         assert Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes() == policy
         assert Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes() == sink
         run(*command, '--rollback', backup)
+        assert b.boot_helper().enabled_states(b.run) == prepared_states
+        assert 'Requires=nftables.service' in Path('/etc/systemd/system/fail2ban.service.d/10-f2b-lab-boot.conf').read_text()
         assert all(path.read_bytes() == data for path, data in canonical.items())
         assert Path('/etc/fail2ban/jail.d/zz-v033-lab.local').read_bytes() == policy
         assert Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').read_bytes() == sink

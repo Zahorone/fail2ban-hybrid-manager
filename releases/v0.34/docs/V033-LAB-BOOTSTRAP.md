@@ -142,10 +142,64 @@ silently cleaned up: preserve backup, do not rerun, restore the clean VM snapsho
 
 This is not the fresh production installer: synthetic placeholders are intentional
 test fixtures, not evidence of real NPM traffic. SSH auth logs are not fabricated
-or read. Baseline boot ordering/persistence and old PHP/action packet semantics
-are not claimed fixed by this lab policy.
+or read. Old PHP/action packet semantics are not certified by this lab policy.
+
+## Mandatory boot preparation and real baseline reboot
+
+Earlier bootstrap prepared runtime only. Disabled nftables loses infrastructure
+after reboot; After= alone does not request its start. Syntax checks and daemon
+restarts are not boot acceptance. Preserve the failed evidence VM and its backup;
+do not blindly start nftables/load the global config. Repeat on a clean snapshot.
+
+After baseline apply, BEFORE upgrade, explicitly authorize disposable-lab-only
+preparation. It refuses upgraded baselines, custom units/drop-ins, non-stock vendor
+loaders and anything except the exact two-owned-includes synthetic configuration:
+
+```sh
+sudo /usr/bin/python3 "$F2B_LAB_ROOT/scripts/bootstrap-v033-lab.py" --upgrade-bundle "$F2B_UPGRADE_ROOT" --prepare-boot --snapshot-confirmed
+```
+
+Preparation privately records original unit enabled states, syntax-checks in a
+private net namespace, installs LAB-ONLY no-flush/no-reload nftables stop semantics
+and Requires= plus After=nftables.service for Fail2Ban and cron, runs daemon-reload
+and enables the three lab units WITHOUT --now. No live firewall load/start/restart
+or reload occurs. At boot, the stock loader reads only the two explicitly owned
+includes: no global flush or foreign table declarations. This is not authorization
+to enable a foreign firewall on an existing host.
+
+```sh
+sudo reboot
+# Reconnect and restore variables for the same verified extracted directories.
+sudo /usr/bin/python3 "$F2B_LAB_ROOT/scripts/bootstrap-v033-lab.py" --upgrade-bundle "$F2B_UPGRADE_ROOT" --check-boot
+sudo systemctl is-enabled nftables fail2ban cron
+sudo systemctl is-active nftables fail2ban cron
+sudo journalctl -b -u nftables.service --no-pager
+sudo fail2ban-client get manualblock banip
+```
+
+The gate refuses the preparation boot ID, pending daemon-reload, disabled/inactive
+units, missing dependencies/order and missing/mistyped timed family infra sets.
+Also inspect the real boot journal, exact jails, documentation bans after bounded
+DB restore, and sync/Docker-union checks; keep evidence local, never upload journals.
+Do not upgrade until all checks pass. This is not packet acceptance.
+
+The boot-preparation backup records ORIGINAL pre-preparation enabled states. To
+restore the pre-manager machine, restore the clean snapshot including those states;
+do not disable dependencies beneath a running lab. Upgrade rollback instead restores
+the PREPARED v0.33 baseline: its enabled units/drop-ins must remain. New product
+backups record/restore original enabled states without --now or firewall restart.
+Immutable 1964009 predates that recording and changes no enabled states: compare the
+prepared states independently after its rollback. Do not call that legacy metadata
+a verified restoration of previously unrecorded state.
 
 ## Upgrade and rollback with independent checks
+
+After upgrade perform a SECOND REAL reboot, repeat --check-boot and the boot journal,
+verify 0.34-dev, exact 11-jail profile, both bans and sync/Docker-union checks. Any
+missing table/set is failure, not permission for manual recreation. Only then roll
+back. After rollback perform a THIRD REAL reboot and repeat the gate, journal,
+0.33-ipv6.1, exact 10-jail profile and both bans. Namespace lifecycle simulations
+are never reboot acceptance. The pinned upgrade artifact/SHA remain unchanged.
 
 ```sh
 sudo fail2ban-client -t

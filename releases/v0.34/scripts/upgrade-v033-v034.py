@@ -45,6 +45,8 @@ SYSTEM_BACKUP_PATHS = (
     Path("etc/nftables.d"),
     Path("etc/systemd/system/nftables.service.d"),
     Path("etc/systemd/system/docker.service.d"),
+    Path("etc/systemd/system/fail2ban.service.d"),
+    Path("etc/systemd/system/cron.service.d"),
     Path("usr/local/bin/f2b"),
     Path("usr/local/bin/nft-save-tables.sh"),
     Path("usr/local/sbin/f2b-docker-hook"),
@@ -591,6 +593,17 @@ def access_filter_contract_conflicts(commands):
     return conflicts
 
 
+def boot_contract():
+    spec = importlib.util.spec_from_file_location('f2b_boot_contract', Path(__file__).with_name('boot-contract.py'))
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def check_boot():
+    try: return boot_contract().check(run)
+    except (ValueError, OSError) as error: raise UpgradeError(str(error)) from error
+
+
 def create_backup(
     backup_base: Path,
     bans: dict[str, list[str]],
@@ -600,6 +613,7 @@ def create_backup(
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup = backup_base / f"{label}-{timestamp}"
     backup.mkdir(parents=True, mode=0o700)
+    (backup / 'unit-enabled-states.json').write_text(json.dumps(boot_contract().enabled_states(run), sort_keys=True) + '\n')
     existing = [str(path) for path in SYSTEM_BACKUP_PATHS if (Path("/") / path).exists()]
     if existing:
         run(
@@ -695,6 +709,7 @@ def restore_files(backup: Path, mapping: dict[Path, Path]) -> None:
 
 
 def verify_after(bans: dict[str, list[str]], before_nft: dict) -> None:
+    check_boot()
     run("fail2ban-client", "-t")
     run("fail2ban-client", "ping")
     restore_missing_bans(bans)
@@ -768,6 +783,12 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
         for sidecar in Path("/var/lib/fail2ban").glob("*.sqlite3" + suffix):
             sidecar.unlink(missing_ok=True)
     run("systemctl", "daemon-reload")
+    states = backup / 'unit-enabled-states.json'
+    if states.exists():
+        try: boot_contract().restore_enabled(run, json.loads(states.read_text()))
+        except ValueError as error: raise UpgradeError(str(error)) from error
+    else:
+        print('LEGACY BACKUP: enabled states were not recorded; no enable/disable attempted')
     run("fail2ban-client", "-t")
     # Restore the original owned firewall, including IPv6 elements and local
     # blocked ports, in one transaction. Never submit the full ruleset backup.
@@ -821,6 +842,7 @@ def preflight(root: Path, mapping: dict[Path, Path], review_file: Path | None = 
         raise UpgradeError("Fail2Ban is not responding")
     validate_dbfile(run("fail2ban-client", "get", "dbfile").stdout)
     validate_package(root, mapping)
+    check_boot()
     audit_targets(root, mapping, review_file)
     run("systemctl", "is-active", "--quiet", "cron")
     version = run("/usr/local/bin/f2b", "version", "--short").stdout.strip().lstrip("v")
