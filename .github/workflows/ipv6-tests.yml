@@ -48,7 +48,9 @@ jobs:
       - name: Reporting graphical presentation and full/short CLI compatibility
         run: /usr/bin/python3 releases/v0.34/tests/test_reporting_presentation.py
       - name: Upgrade transaction unit tests
-        run: /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
+        run: |
+          /usr/bin/python3 releases/v0.34/tests/test_upgrade.py
+          /usr/bin/python3 releases/v0.34/tests/test_rollback_readiness.py
       - name: Complete upgrade conflict and rollback tests
         run: /usr/bin/python3 releases/v0.34/tests/test_upgrade_package.py
       - name: Canary 227c393 transaction scope tests

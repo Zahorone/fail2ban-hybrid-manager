@@ -176,3 +176,49 @@ enable nftables. New backups record/restore exact enabled states without --now o
 firewall restart. Legacy backups without that metadata are explicitly identified.
 Namespace systemd simulations are not reboot acceptance. The immutable 1964009
 artifact has not been modified to add this gate.
+# Bounded native rollback readiness and read-only audit
+
+The old immediate post-start ping can fail before the socket exists. That skips
+the old missing-ban restoration/assertion and final foreign-firewall check, even
+if systemd later becomes active and the daemon restores its DB tickets. File/DB
+restoration, sidecar cleanup, daemon-reload, owned-table restoration and the start
+request precede that ping. There was no rollback-complete marker: a lab boot marker
+records boot preparation, NOT rollback success. A later pong/reboot is evidence
+of runtime recovery, not proof that the failed CLI completed all verification.
+
+New explicit and automatic rollback share a 60-second readiness deadline, with
+bounded child commands. They wait for socket/pong, the EXACT original jail set,
+and native DB restoration of still-valid tickets with their original absolute
+expiry (one-second display tolerance). Natural expiry during waiting is allowed;
+missing/permanent/retimed tickets are never re-added to make the test pass.
+Timeout propagates as failure, including automatic rollback double-failure
+reporting. Foreign rules are checked after full readiness; Docker/nftables are
+never restarted or globally loaded. This fixes readiness, not boot/packet acceptance.
+
+This is deliberately conservative, not a new ticket-migration mechanism. A
+read-only schema-4 native DB check compares current active tickets to the rollback
+backup BEFORE stopping Fail2Ban. New/revoked/retimed/new-jail tickets cause refusal
+without file/DB/firewall restore. The old re-add/new-jail fallback could reset or
+shorten TTL and is NOT retained. A second check after stop catches a shutdown race;
+on mismatch the service is stopped but the live DB/files are not overwritten:
+retain state/backup for reviewed recovery, never blindly retry. Unknown/missing DB
+schemas likewise require review. Original backup/history remains intact; no SQL
+ticket insert/migration or control-plane banip write is performed by rollback.
+
+For the historical early-ping failure, use the NEW verified product archive,
+not the immutable 1964009 script, and the exact old backup path locally:
+
+```sh
+sudo /usr/bin/python3 "$F2B_PRODUCT_ROOT/scripts/upgrade-v033-v034.py" --audit-rollback /EXACT/PRIVATE/BACKUP
+```
+
+Audit verifies backup checksums, original config/managed bytes, absence of introduced
+targets, exact jails/native expiry, infrastructure/boot prerequisites, foreign rules
+and recorded enabled states. It does not stop/start/reload, restore files, create a
+transaction lock or re-add bans. Legacy backups without enabled-state metadata are
+explicitly NOT verified for those original states; inspect locally. Timeout or any
+mismatch is not permission to repair/re-run. Keep all logs, backup paths, DB/config
+and audit detail private. Two asynchronous namespace lifecycle tests do not replace
+real VM tests. Ubuntu 26 ARM64 runtime/reboot recovery observed with the old tool
+still has failed rollback CLI acceptance; Ubuntu 24 amd64 and post-upgrade/rollback
+packet acceptance remain open. No immutable 1964009 archive/release is changed.

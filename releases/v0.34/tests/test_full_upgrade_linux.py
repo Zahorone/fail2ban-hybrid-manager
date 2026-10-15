@@ -177,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         'show*--property=Requires*|show*--property=After*) echo nftables.service;;\n'
         'show*--property=ExecStart*) echo "/usr/sbin/nft -f /etc/nftables.conf";;\n'
         '"stop fail2ban") exec fail2ban-client stop;;\n'
-        '"start fail2ban") exec fail2ban-client -x start;;\n'
+        '"start fail2ban") (sleep 1; fail2ban-client -x start) >/dev/null 2>&1 & exit 0;;\n'
         '"daemon-reload"|"is-active --quiet cron") exit 0;;\n'
         '"is-active fail2ban nftables docker") printf "active\\nactive\\nactive\\n";;\n'
         '*) echo "Forbidden systemctl: $*" >&2; exit 99;;\nesac\n')
@@ -280,7 +280,18 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert_site_protections()
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
+        # Never silently move/re-add a post-backup ban with a new start/TTL.
+        refused = run(*command, '--rollback', str(backup), check=False)
+        assert refused.returncode != 0 and 'BEFORE stop' in refused.stderr, refused.stderr
+        assert run('fail2ban-client', 'ping').returncode == 0
+        assert '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout
+        assert site.read_bytes() == before[site]
+        assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
+        # Explicit fixture cleanup, NOT recovery behavior or a passing re-add.
+        run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'unbanip', '192.0.2.99')
+        wait(lambda: '192.0.2.99' not in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
         print(run(*command, '--rollback', str(backup)).stdout)
+        print(run(*command, '--audit-rollback', str(backup)).stdout)
         if reviewed_original is not None:
             assert Path('/etc/fail2ban/filter.d/nginx-recon-optimized.conf').read_bytes() == reviewed_original
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
@@ -289,7 +300,6 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert_site_protections()
         restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
         assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8'))
-        assert '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep' if is_dev else 'manualblock', 'banip').stdout
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
         # Actual auto-rollback after a fault in the third file replacement.
         spec = importlib.util.spec_from_file_location('full_upgrade_fault', script)
@@ -317,9 +327,18 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert Path('/etc/fail2ban/jail.local').read_bytes() == original_jail
         restored = run('fail2ban-client', 'get', 'manualblock', 'banip').stdout
         assert all(ip in restored for ip in ('192.0.2.8', '2001:db8::8'))
-        assert '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep' if is_dev else 'manualblock', 'banip').stdout
         assert foreign == run('nft', '-s', 'list', 'table', 'ip', 'foreign-nat').stdout
-        print('PASS: legacy v0.33 full preflight/apply/repeat/rollback; overrides, timed bans, new-jail fallback and foreign NAT preserved (systemd/cron simulated)')
+        # Real daemon missing socket must time out; a later async start then
+        # restores from native DB only, without any test-side ticket re-add.
+        expected_jails, expected_tickets = module.rollback_expectations(backup, compare_live=False)
+        run('fail2ban-client', 'stop')
+        try: module.wait_rollback_ready(expected_jails, expected_tickets, timeout=.6)
+        except module.UpgradeError as error: assert 'readiness timeout' in str(error)
+        else: raise AssertionError('Stopped real daemon was reported ready')
+        run('systemctl', 'start', 'fail2ban')
+        module.wait_rollback_ready(expected_jails, expected_tickets, timeout=15)
+        assert_site_protections()
+        print('PASS: legacy full preflight/apply/repeat, async manual/automatic rollback and readonly audit; native timed bans/local overrides/foreign NAT preserved, unrepresentable new tickets refused BEFORE stop (systemd/cron simulated)')
         if preserved_overrides:
             print(f'PASS: representative scan-review .local coexistence and separate Apache guard preserved across apply/repeat/manual+automatic rollback; baseline v034dev={is_dev}')
     except Exception:
