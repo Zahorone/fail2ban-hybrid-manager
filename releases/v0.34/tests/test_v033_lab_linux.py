@@ -32,7 +32,7 @@ def load(name, file):
     spec = importlib.util.spec_from_file_location(name, file); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
 
 
-run('mount', '--make-rprivate', '/'); run('mount', '-t', 'tmpfs', 'tmpfs', '/run'); Path('/run/lock').mkdir()
+run('mount', '--make-rprivate', '/'); run('mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/run'); Path('/run/lock').mkdir(mode=0o1777)
 with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     directory = Path(directory)
     for archive_name, folder in (('/tmp/f2b-v033-lab.tar.gz', 'lab'), ('/tmp/f2b-pinned1964/f2b-complete-upgrade.tar.gz', 'upgrade')):
