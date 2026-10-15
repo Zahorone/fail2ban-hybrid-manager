@@ -132,11 +132,11 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         finally:
             b.os.open = original_open; existing_log.unlink(); displaced.rename(existing_log)
         # O_NOFOLLOW applies to parents too; use an isolated child under /var.
-        test_parent = Path('/var/f2b-lab-parent-test'); test_parent.mkdir()
+        test_parent = Path('/var/lib/f2b-lab-parent-test'); test_parent.mkdir()
         test_link = test_parent / 'link'; test_link.symlink_to(logdir)
         refused(lambda: b.safe(test_link / 'file'), test_link, 'symlink')
         def symlink_parent_open(name, flags, *args, **kwargs):
-            if name == 'log': name = 'f2b-lab-parent-test/link'
+            if name == 'log': name = 'lib/f2b-lab-parent-test/link'
             return original_open(name, flags, *args, **kwargs)
         b.os.open = symlink_parent_open
         try: refused(b.log_directory, '/var/log', 'Not a directory')
