@@ -280,6 +280,10 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         assert_site_protections()
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
+        def native_new_ticket():
+            with sqlite3.connect('file:/var/lib/fail2ban/fail2ban.sqlite3?mode=ro', uri=True) as connection:
+                return connection.execute('SELECT 1 FROM bips WHERE jail=? AND ip=?', ('f2b-webshell-sweep', '192.0.2.99')).fetchone() is not None
+        wait(native_new_ticket)
         # Never silently move/re-add a post-backup ban with a new start/TTL.
         refused = run(*command, '--rollback', str(backup), check=False)
         assert refused.returncode != 0 and 'BEFORE stop' in refused.stderr, refused.stderr
@@ -290,6 +294,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         # Explicit fixture cleanup, NOT recovery behavior or a passing re-add.
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'unbanip', '192.0.2.99')
         wait(lambda: '192.0.2.99' not in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
+        wait(lambda: not native_new_ticket())
         print(run(*command, '--rollback', str(backup)).stdout)
         print(run(*command, '--audit-rollback', str(backup)).stdout)
         if reviewed_original is not None:

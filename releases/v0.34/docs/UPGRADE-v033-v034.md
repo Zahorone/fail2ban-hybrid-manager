@@ -120,7 +120,7 @@ automation remains the operator's responsibility. A shell command hidden in an
 external script is not exhaustively audited by this tool.
 
 Runtime checks include real active members and zero-ban lazy action lifecycle.
-Missing bans are restored; records already present retain their DB timings.
+During the STANDARD UPGRADE RELOAD path, missing bans are restored; records already present retain their DB timings.
 When a missing ban must be re-added through Fail2Ban's public API, its jail's
 current bantime is reapplied (expiry may be extended). Original timed records
 are retained as evidence; exact per-IP remaining-time restoration is NOT claimed.
@@ -138,14 +138,14 @@ recovery succeeded. Inspect the error and use console access as needed.
 sudo /usr/bin/python3 scripts/upgrade-v033-v034.py --rollback /EXACT/PRINTED/BACKUP
 ```
 
-Rollback verifies backup checksums, snapshots new bans when the daemon responds,
+Rollback verifies backup checksums and refuses differing active native DB tickets before stop,
 stops Fail2Ban, removes only newly introduced managed files, restores original
 config/DB/helpers/persistence/systemd files, removes stale SQLite WAL/SHM files,
 daemon-reloads systemd, tests configuration, atomically restores ONLY the two
-owned live tables from the backup, starts Fail2Ban and restores missing bans. No
+owned live tables from the backup, starts Fail2Ban and waits for full native DB restoration. No
 full-ruleset backup is ever loaded. Original IPv6 elements and blocked ports are
-included in this scoped firewall recovery. Bans from
-a removed new jail move to an original `manualblock`, otherwise `recidive`.
+included in this scoped firewall recovery. Active bans from a removed new jail
+require separately reviewed DB migration; no implicit fallback/re-add is performed.
 If the daemon cannot respond, only the saved snapshot/DB is recoverable; bans
 acquired later may be unavailable. Fail2Ban is briefly stopped. This is not an
 uninterrupted-firewall guarantee. Foreign firewall changes cause a visible
