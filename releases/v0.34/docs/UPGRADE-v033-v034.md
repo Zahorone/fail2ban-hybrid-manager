@@ -199,7 +199,9 @@ never restarted or globally loaded. This fixes readiness, not boot/packet accept
 
 This is deliberately conservative, not a new ticket-migration mechanism. A
 read-only schema-4 native DB check compares current active tickets to the rollback
-backup BEFORE stopping Fail2Ban. New/revoked/retimed/new-jail tickets cause refusal
+backup BEFORE stopping Fail2Ban, and requires saved ban/timestamp evidence to be
+represented by native DB tickets. A responding empty daemon cannot pass for lost
+saved bans. New/revoked/retimed/new-jail tickets cause refusal
 without file/DB/firewall restore. The old re-add/new-jail fallback could reset or
 shorten TTL and is NOT retained. A second check after stop catches a shutdown race;
 on mismatch the service is stopped but the live DB/files are not overwritten:

@@ -775,7 +775,8 @@ def native_tickets(database: Path, now: float) -> dict:
 
 
 def rollback_expectations(backup: Path, compare_live=True) -> tuple[set, dict]:
-    jails = set(json.loads((backup / 'fail2ban-bans.json').read_text()))
+    saved_bans = json.loads((backup / 'fail2ban-bans.json').read_text())
+    jails = set(saved_bans)
     if not jails: raise UpgradeError('Backup has no expected rollback jails')
     with tempfile.TemporaryDirectory(prefix='f2b-rollback-db-check-') as temporary:
         database = Path(temporary) / 'native.sqlite3'
@@ -787,6 +788,16 @@ def rollback_expectations(backup: Path, compare_live=True) -> tuple[set, dict]:
         now = time.time()
         expected = native_tickets(database, now)
         if set(expected) - jails: raise UpgradeError('Backup active tickets refer to unavailable rollback jails')
+        saved_times = timed_records(json.loads((backup / 'fail2ban-ban-times.json').read_text()))
+        for jail, addresses in saved_bans.items():
+            for address in addresses:
+                saved = saved_times.get(jail, {}).get(address, 'missing')
+                if saved == 'missing': raise UpgradeError('Backup lacks timed evidence for a saved ban; no changes made')
+                if saved is not None and saved <= now: continue
+                native = expected.get(jail, {}).get(address, 'missing')
+                if (saved is None and native is not None) or (saved is not None and
+                        (type(native) not in {int, float} or abs(saved - native) > 1)):
+                    raise UpgradeError('Backup saved ban lacks matching native DB ticket/expiry; no re-add or changes made')
         if compare_live and native_tickets(Path('/var/lib/fail2ban/fail2ban.sqlite3'), now) != expected:
             raise UpgradeError('Rollback refused BEFORE stop: current DB tickets differ from backup (new/revoked/retimed/new-jail ban). '
                                'No re-add or implicit DB migration is allowed; preserve state/backup for reviewed recovery')
@@ -1030,7 +1041,7 @@ def main() -> int:
         print(f"PASS: upgraded to {RELEASE}; backup: {backup}")
         print("Docker and nftables services were not restarted. No nftables ruleset was loaded or flushed.")
         return 0
-    except (OSError, UpgradeError, sqlite3.Error, tarfile.TarError, KeyError, json.JSONDecodeError) as error:
+    except (OSError, UpgradeError, sqlite3.Error, tarfile.TarError, KeyError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

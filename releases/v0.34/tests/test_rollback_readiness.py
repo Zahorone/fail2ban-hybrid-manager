@@ -61,9 +61,15 @@ with tempfile.TemporaryDirectory() as temporary:
     assert database.read_bytes() == original
     with tarfile.open(backup / 'system-files.tar', 'w') as archive:
         archive.add(database, arcname='var/lib/fail2ban/fail2ban.sqlite3')
-    (backup / 'fail2ban-bans.json').write_text(json.dumps(dict.fromkeys(jails, [])))
+    (backup / 'fail2ban-bans.json').write_text(json.dumps({'manualblock': ['192.0.2.8'], 'recidive': []}))
+    (backup / 'fail2ban-ban-times.json').write_text(json.dumps({'manualblock': [record], 'recidive': []}))
     with patch.object(m.time, 'time', return_value=1050):
         assert m.rollback_expectations(backup, compare_live=False) == (jails, expected)
+        (backup / 'fail2ban-ban-times.json').write_text(json.dumps({'manualblock': [], 'recidive': []}))
+        try: m.rollback_expectations(backup, compare_live=False)
+        except m.UpgradeError as error: assert 'lacks timed evidence' in str(error)
+        else: raise AssertionError('Backup without native restore proof was accepted')
+        (backup / 'fail2ban-ban-times.json').write_text(json.dumps({'manualblock': [record], 'recidive': []}))
     (backup / 'manifest.json').write_text(json.dumps({'schema': 1, 'targets': [], 'members': []}))
     with patch.object(m, 'verify_backup'), patch.object(m, 'rollback_expectations', side_effect=m.UpgradeError('ticket drift')), patch.object(m, 'run') as run:
         try: m.rollback(backup)
