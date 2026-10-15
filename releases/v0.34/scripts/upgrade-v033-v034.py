@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import closing
 import datetime as dt
 import fcntl
 import hashlib
@@ -654,8 +655,8 @@ def create_backup(
 
 
 def backup_sqlite(database: Path, destination: Path) -> None:
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
-        with sqlite3.connect(destination) as target:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as source:
+        with closing(sqlite3.connect(destination)) as target:
             source.backup(target)
     shutil.copystat(database, destination)
     if os.geteuid() == 0:
@@ -758,7 +759,7 @@ def verify_release_runtime(bans: dict[str, list[str]], before_nft: dict) -> None
 def native_tickets(database: Path, now: float) -> dict:
     """Read-only recognized schema; no ticket insert/re-add or TTL correction."""
     if database.is_symlink() or not database.is_file(): raise UpgradeError('Native rollback database missing/unsafe')
-    with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=2) as connection:
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=2)) as connection:
         if connection.execute('PRAGMA integrity_check').fetchone() != ('ok',):
             raise UpgradeError('Native rollback database integrity failed')
         if connection.execute('SELECT version FROM fail2banDb').fetchall() != [(4,)]:

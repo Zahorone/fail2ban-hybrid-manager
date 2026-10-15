@@ -281,7 +281,7 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
         run('fail2ban-client', 'set', 'f2b-webshell-sweep', 'banip', '192.0.2.99')
         wait(lambda: '192.0.2.99' in run('fail2ban-client', 'get', 'f2b-webshell-sweep', 'banip').stdout)
         def native_new_ticket():
-            with sqlite3.connect('file:/var/lib/fail2ban/fail2ban.sqlite3?mode=ro', uri=True) as connection:
+            with contextlib.closing(sqlite3.connect('file:/var/lib/fail2ban/fail2ban.sqlite3?mode=ro', uri=True)) as connection:
                 return connection.execute('SELECT 1 FROM bips WHERE jail=? AND ip=?', ('f2b-webshell-sweep', '192.0.2.99')).fetchone() is not None
         wait(native_new_ticket)
         # Never silently move/re-add a post-backup ban with a new start/TTL.
