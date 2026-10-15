@@ -20,9 +20,11 @@ doc = {'nftables': [{'metainfo': {'version': 'synthetic'}},
     {'rule': {'family': 'inet', 'table': 'synthetic', 'chain': 'guard', 'handle': 3, 'expr': [{'drop': None}]}}]}
 
 
-def refused(old, new):
+def refused(old, new, reason=None):
     try: m.compare(old, new)
-    except ValueError: return
+    except ValueError as error:
+        if reason: assert reason in str(error), str(error)
+        return
     raise AssertionError('Real/uncertain runtime change was accepted')
 
 
@@ -82,8 +84,8 @@ if '--net' in sys.argv:
         refused(new, m.capture(run))
         old = m.capture(run)
         run('nft', 'delete', 'element', 'inet', table, 'v4', '{ 192.0.2.8 }')
-        run('nft', 'add', 'element', 'inet', table, 'v4', '{ 192.0.2.8 timeout 60s }')
-        refused(old, m.capture(run))
+        run('nft', 'add', 'element', 'inet', table, 'v4', '{ 192.0.2.8 timeout 30s }')
+        refused(old, m.capture(run), 'absolute expiry')
         old = m.capture(run)
         run('nft', 'delete', 'element', 'inet', table, 'v6', '{ 2001:db8::8 }')
         refused(old, m.capture(run))
