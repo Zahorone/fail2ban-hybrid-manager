@@ -8,6 +8,8 @@ import importlib.util
 import io
 import json
 import os
+import grp
+import stat
 from pathlib import Path
 import shutil
 import subprocess
@@ -68,6 +70,72 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     original_load = b.load
     b.load = lambda name, file: fresh if name == 'lab_fresh' else original_load(name, file)
     try:
+        # Real Ubuntu root:syslog 0775 layout; never change the host bind source.
+        logdir = Path('/var/log'); syslog_gid = grp.getgrnam('syslog').gr_gid
+        os.chown(logdir, 0, syslog_gid); logdir.chmod(0o775)
+        existing_log = logdir / 'fail2ban.log'
+        existing_log.write_text('synthetic distribution log; preserve exactly\n'); existing_log.chmod(0o640)
+        original_log = existing_log.read_bytes(); original_inode = existing_log.stat().st_ino
+
+        def refused(call, path, reason):
+            try: call()
+            except (ValueError, OSError) as error:
+                assert str(path) in str(error) and reason in str(error), str(error)
+            else: raise AssertionError('Unsafe log path accepted: ' + str(path))
+
+        b.canonical_logs()
+        refused(lambda: b.safe(existing_log), logdir, 'group-writable')
+        for mode, uid, gid, reason in ((0o777, 0, syslog_gid, 'world-writable'),
+                (0o775, 1, syslog_gid, 'owner'), (0o775, 0, 0, 'group-writable')):
+            os.chown(logdir, uid, gid); logdir.chmod(mode)
+            refused(b.canonical_logs, logdir, reason)
+        os.chown(logdir, 0, syslog_gid); logdir.chmod(0o775)
+        for mode, uid, reason in ((0o666, 0, 'world-writable'), (0o640, 1, 'owner'), (0o660, 0, 'group-writable')):
+            os.chown(existing_log, uid, 0); existing_log.chmod(mode)
+            refused(b.canonical_logs, existing_log, reason)
+        os.chown(existing_log, 0, 0); existing_log.chmod(0o640)
+        planted = logdir / 'fail2ban-blocked-ips.txt'
+        victim = directory / 'victim'; victim.write_text('do not touch')
+        planted.symlink_to(victim)
+        refused(lambda: b.canonical_logs(create=True), planted, 'symlink')
+        planted.unlink()
+        os.link(existing_log, planted)
+        refused(b.canonical_logs, existing_log, 'single-link')
+        planted.unlink()
+        # A syslog writer can insert a name after the missing-file check.
+        # O_EXCL must refuse, not follow or overwrite the planted symlink.
+        original_open = b.os.open
+        def race_open(name, flags, *args, **kwargs):
+            if name == planted.name and flags & os.O_EXCL:
+                planted.symlink_to(victim)
+            return original_open(name, flags, *args, **kwargs)
+        b.os.open = race_open
+        try: refused(lambda: b.canonical_logs(create=True), planted.name, 'File exists')
+        finally:
+            b.os.open = original_open; planted.unlink()
+        assert victim.read_text() == 'do not touch'
+        # Existing Fail2Ban log swapped between lstat and open: inode check.
+        displaced = logdir / 'distribution-log.saved'
+        def replace_open(name, flags, *args, **kwargs):
+            if name == existing_log.name:
+                existing_log.rename(displaced)
+                existing_log.write_text('replacement'); existing_log.chmod(0o600)
+            return original_open(name, flags, *args, **kwargs)
+        b.os.open = replace_open
+        try: refused(b.canonical_logs, existing_log, 'replaced during validation')
+        finally:
+            b.os.open = original_open; existing_log.unlink(); displaced.rename(existing_log)
+        # O_NOFOLLOW applies to parents too; use an isolated child under /var.
+        test_parent = Path('/var/f2b-lab-parent-test'); test_parent.mkdir()
+        test_link = test_parent / 'link'; test_link.symlink_to(logdir)
+        refused(lambda: b.safe(test_link / 'file'), test_link, 'symlink')
+        def symlink_parent_open(name, flags, *args, **kwargs):
+            if name == 'log': name = 'f2b-lab-parent-test/link'
+            return original_open(name, flags, *args, **kwargs)
+        b.os.open = symlink_parent_open
+        try: refused(b.log_directory, '/var/log', 'Not a directory')
+        finally: b.os.open = original_open
+        test_link.unlink(); test_parent.rmdir()
         # Rename within the same private bind mount, not across /etc -> /tmp.
         parent = Path('/etc/fail2ban/jail.d'); saved_parent = parent.with_name('jail.d-fixture-saved')
         parent.rename(saved_parent); parent.symlink_to(saved_parent)
@@ -82,14 +150,17 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         before = {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
         b.preflight(upgrade)
         assert before == {p: p.read_bytes() for p in Path('/etc/fail2ban').rglob('*') if p.is_file()}
+        assert existing_log.read_bytes() == original_log and existing_log.stat().st_ino == original_inode
         b.apply(upgrade)
+        assert logdir.stat().st_uid == 0 and logdir.stat().st_gid == syslog_gid and stat.S_IMODE(logdir.stat().st_mode) == 0o775
+        assert stat.S_IMODE(b.PRIVATE_LOGS.parent.stat().st_mode) == 0o700
         mail = run('fail2ban-client', 'get', 'nginx-php-errors', 'action', 'sendmail-whois-lines', 'actionban').stdout
         assert 'Synthetic lab: external whois disabled' in mail
-        assert '/bin/cat >> /var/log/f2b-v033-lab-mail.log' in mail
+        assert '/bin/cat >> /var/lib/f2b-v033-lab/logs/mail.log' in mail
         run('fail2ban-client', 'set', 'nginx-php-errors', 'banip', '192.0.2.18')
         import time
         for _ in range(100):
-            if '192.0.2.18' in Path('/var/log/f2b-v033-lab-mail.log').read_text(): break
+            if '192.0.2.18' in (b.PRIVATE_LOGS / 'mail.log').read_text(): break
             time.sleep(.1)
         else: raise AssertionError('Genuine mail action did not reach local-only sink')
         run('fail2ban-client', 'set', 'nginx-php-errors', 'unbanip', '192.0.2.18')
