@@ -274,9 +274,14 @@ with real Fail2Ban/nft: preflight nonmutation, bootstrap/restart, pinned upgrade
 rollback/restart/repreflight, canonical/local bytes, both-family timed bans and a
 foreign sentinel. Platform/systemd/cron are simulated; these are not VM results.
 
-A real Ubuntu 26 ARM64 run adds current-distribution/ARM package and daemon API
-compatibility, upgrade and rollback restart evidence. It does NOT replace the
+The reported real Ubuntu 26.04 ARM64 a2d5444 product cycle from the prepared
+aeff5d0 lab baseline now provides upgrade, explicit rollback CLI/read-only audit
+and real post-upgrade/post-rollback reboot PASS. The exact receipt and scoped
+ledger are in repository `releases/v0.34/docs/INTEGRATED-VALIDATION.md` (not bundled
+in the standalone lab archive). This is not a new bootstrap artifact
+or acceptance of a different rebuilt receipt. It does NOT replace the
 planned Ubuntu 24 amd64 representative valid-v0.33/Docker/UFW clone, exercise an
 Ubuntu OS upgrade, certify pristine a88bacb, test genuine NPM traffic/packet drops,
-or prove boot/reboot persistence. Those existing acceptance gates remain separate.
+or certify real-VM fault injection/changed-ticket recovery. Boot/runtime PASS is
+scoped to that exact cycle; representative and packet gates remain separate.
 No RC/stable promotion or v0.40 changes are authorized by this bootstrap.

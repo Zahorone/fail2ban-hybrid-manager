@@ -223,6 +223,10 @@ transaction lock or re-add bans. Legacy backups without enabled-state metadata a
 explicitly NOT verified for those original states; inspect locally. Timeout or any
 mismatch is not permission to repair/re-run. Keep all logs, backup paths, DB/config
 and audit detail private. Two asynchronous namespace lifecycle tests do not replace
-real VM tests. Ubuntu 26 ARM64 runtime/reboot recovery observed with the old tool
-still has failed rollback CLI acceptance; Ubuntu 24 amd64 and post-upgrade/rollback
-packet acceptance remain open. No immutable 1964009 archive/release is changed.
+real VM tests. Historical Ubuntu 26 ARM64 recovery with immutable 1964009 still
+has failed rollback CLI acceptance. A separate real Ubuntu 26.04 ARM64 cycle with
+exact a2d5444 product receipt now reports explicit rollback CLI, read-only audit
+and subsequent restored-baseline reboot PASS; see the scoped evidence ledger in
+[INTEGRATED-VALIDATION.md](INTEGRATED-VALIDATION.md). It does not accept Ubuntu 24
+amd64, post-upgrade/rollback packets, real-VM fault injection or changed-ticket
+recovery. No immutable 1964009 archive/release is changed.
