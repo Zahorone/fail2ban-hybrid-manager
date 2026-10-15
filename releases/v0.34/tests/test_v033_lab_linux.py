@@ -32,7 +32,8 @@ def load(name, file):
     spec = importlib.util.spec_from_file_location(name, file); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
 
 
-run('mount', '--make-rprivate', '/'); run('mount', '-t', 'tmpfs', 'tmpfs', '/run'); Path('/run/lock').mkdir()
+run('mount', '--make-rprivate', '/'); run('mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/run'); Path('/run/lock').mkdir(mode=0o1777)
+Path('/run/lock').chmod(0o1777)  # Standard sticky lock directory, in our PRIVATE tmpfs only.
 with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     directory = Path(directory)
     for archive_name, folder in (('/tmp/f2b-v033-lab.tar.gz', 'lab'), ('/tmp/f2b-pinned1964/f2b-complete-upgrade.tar.gz', 'upgrade')):
@@ -189,7 +190,25 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
             else: raise AssertionError('Unsafe boot include was accepted')
             assert not Path('/etc/systemd/system/nftables.service.d/10-f2b-lab-boot.conf').exists()
         include.write_bytes(original_include)
-        b.prepare_boot(upgrade)
+        for lock_name in ('f2b-upgrade.lock', 'f2b-runtime-sync.lock'):
+            child = subprocess.Popen([sys.executable, '-c',
+                'import fcntl,sys; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); print("ready",flush=True); sys.stdin.read(1)',
+                '/run/lock/' + lock_name], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            try:
+                assert child.stdout.readline().strip() == 'ready'
+                try: b.prepare_boot(upgrade)
+                except ValueError as error: assert 'lock busy' in str(error), str(error)
+                else: raise AssertionError('Busy preparation lock was ignored')
+                assert not Path('/etc/f2b/v033-lab-boot.json').exists()
+            finally: child.communicate('x', timeout=5)
+        original_run = b.run
+        def delayed_enable(*args):
+            if args == ('systemctl', 'enable', 'nftables.service'): time.sleep(2.3)
+            return original_run(*args)
+        b.run = delayed_enable
+        try: b.prepare_boot(upgrade)
+        finally: b.run = original_run
+        assert json.loads(Path('/etc/f2b/v033-lab-boot.json').read_text())['status'] == 'prepared'
         try: b.check_boot()
         except ValueError as error: assert 'Real reboot required' in str(error)
         else: raise AssertionError('Namespace provisioning claimed real reboot acceptance')
@@ -218,6 +237,33 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         else: raise AssertionError('Timed bans absent after bounded rollback restart restore: ' + restored)
         run(*command)
         assert run('nft', '-s', 'list', 'table', 'inet', 'synthetic-foreign').stdout == before_foreign
+        # Separate synthetic failure case, after the successful transaction.
+        # Remove ONLY our known fixture files in this private mount namespace.
+        for unit in ('nftables', 'fail2ban', 'cron'):
+            (Path('/etc/systemd/system') / (unit + '.service.d/10-f2b-lab-boot.conf')).unlink()
+        state = Path('/etc/f2b/v033-lab-boot.json'); state.unlink()
+        def fail_after_enable(*args):
+            result = original_run(*args)
+            if args == ('systemctl', 'enable', 'cron.service'):
+                raise RuntimeError('synthetic failure after drop-in and enable operations')
+            return result
+        b.run = fail_after_enable
+        try:
+            try: b.prepare_boot(upgrade)
+            except RuntimeError as error: assert 'synthetic failure' in str(error)
+            else: raise AssertionError('Injected preparation failure was swallowed')
+        finally: b.run = original_run
+        failed = json.loads(state.read_text())
+        assert failed['status'] == 'failed' and stat.S_IMODE(state.stat().st_mode) == 0o600
+        assert Path(failed['backup'], 'unit-enabled-states.json').is_file()
+        assert Path(failed['backup'], 'runtime-before.json').is_file()
+        try: b.check_boot()
+        except ValueError as error: assert 'restore clean snapshot' in str(error)
+        else: raise AssertionError('Failed preparation was accepted for reboot')
+        try: b.prepare_boot(upgrade)
+        except ValueError: pass
+        else: raise AssertionError('Partial preparation was silently rerun')
+        assert json.loads(state.read_text())['status'] == 'failed'
         print('PASS: exact canonical lab archive, readonly preflight, bootstrap/restart, pinned 1964009 upgrade, rollback/restart/repreflight, overrides/both-family bans/foreign rules preserved; systemd/platform simulated')
     finally:
         run('fail2ban-client', 'stop', check=False)

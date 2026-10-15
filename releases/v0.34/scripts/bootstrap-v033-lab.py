@@ -2,6 +2,8 @@
 """Disposable synthetic VM only. Read-only preflight by default; no old installer."""
 import argparse
 import configparser
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import grp
 import importlib.util
@@ -259,8 +261,64 @@ def boot_id(): return Path('/proc/sys/kernel/random/boot_id').read_text().strip(
 def boot_helper(): return load('lab_boot_contract', ROOT / 'scripts/boot-contract.py')
 
 
+@contextmanager
+def preparation_locks():
+    # Same order as managed persistence: upgrade, then runtime sync. Never
+    # query the Fail2Ban socket under these locks; legacy direct writers are
+    # not assumed to cooperate and are checked by the endpoint guard instead.
+    safe(Path('/run'))
+    directory = os.open('/run/lock', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptors = []
+    try:
+        info = os.fstat(directory)
+        if info.st_uid != 0 or (info.st_mode & 0o022 and stat.S_IMODE(info.st_mode) != 0o1777):
+            raise ValueError('Unsafe preparation lock directory /run/lock')
+        for name in ('f2b-upgrade.lock', 'f2b-runtime-sync.lock'):
+            try: prior = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError: prior = None
+            if prior is not None:
+                check_node(Path('/run/lock') / name, prior)
+                if not stat.S_ISREG(prior.st_mode) or prior.st_nlink != 1: raise ValueError('Unsafe preparation lock: ' + name)
+            descriptor = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+            descriptors.append(descriptor); opened = os.fstat(descriptor)
+            check_node(Path('/run/lock') / name, opened)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1: raise ValueError('Unsafe preparation lock: ' + name)
+            if prior is not None and (prior.st_dev, prior.st_ino) != (opened.st_dev, opened.st_ino):
+                raise ValueError('Preparation lock replaced during open: ' + name)
+            try: fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error: raise ValueError('Preparation refused: upgrade/runtime sync lock busy; no unit changes') from error
+        yield
+    finally:
+        for descriptor in reversed(descriptors): os.close(descriptor)
+        os.close(directory)
+
+
+def save_boot_state(path, value, exclusive=False):
+    safe(path)
+    if exclusive:
+        with path.open('x') as stream:
+            os.fchmod(stream.fileno(), 0o600); json.dump(value, stream); stream.flush(); os.fsync(stream.fileno())
+    else:
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix='.lab-boot-', delete=False) as stream:
+            temporary = Path(stream.name)
+            try:
+                json.dump(value, stream); stream.flush(); os.fsync(stream.fileno())
+                os.replace(temporary, path)
+            finally: temporary.unlink(missing_ok=True)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try: os.fsync(descriptor)
+    finally: os.close(descriptor)
+
+
 def prepare_boot(bundle):
+    with preparation_locks(): _prepare_boot(bundle)
+
+
+def _prepare_boot(bundle):
     inventory()
+    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
+    if state.exists():
+        raise ValueError('Preparation marker already exists: retain private backup; no rerun/adoption; restore clean snapshot on failure')
     marker = Path('/etc/f2b/v033-lab.state'); safe(marker)
     if not marker.is_file() or not marker.read_text().startswith('complete;'):
         raise ValueError('Only a complete synthetic baseline can prepare boot')
@@ -299,26 +357,38 @@ def prepare_boot(bundle):
     helper = boot_helper(); original = helper.enabled_states(run)
     if any(state not in {'enabled', 'disabled'} for state in original.values()):
         raise ValueError('Masked/static/custom lab service state requires review')
-    before = run('nft', '-j', 'list', 'ruleset')
+    snapshot = load('lab_nft_snapshot', ROOT / 'scripts/lab-nft-snapshot.py')
+    before = snapshot.capture(run)
     safe(Path('/var/backups'))
     backup = Path(tempfile.mkdtemp(prefix='f2b-lab-boot-', dir='/var/backups')); backup.chmod(0o700)
     (backup / 'unit-enabled-states.json').write_text(json.dumps(original, sort_keys=True) + '\n')
+    (backup / 'runtime-before.json').write_text(json.dumps(before, sort_keys=True) + '\n')
     print('Private boot-preparation backup:', backup)
     nft_dropin = ('[Unit]\nBefore=fail2ban.service cron.service\n[Service]\nExecStop=\nExecReload=\nExecReload=/bin/false\n')
     consumer_dropin = '[Unit]\nRequires=nftables.service\nAfter=nftables.service\n'
-    for unit in ('nftables', 'fail2ban', 'cron'):
-        folder = Path('/etc/systemd/system') / (unit + '.service.d'); folder.mkdir(exist_ok=True)
-        with (folder / '10-f2b-lab-boot.conf').open('x') as stream:
-            stream.write(nft_dropin if unit == 'nftables' else consumer_dropin)
-    run('systemctl', 'daemon-reload')
-    # Enable only: NO --now, start/restart/reload nftables or global live load.
-    for unit in helper.UNITS: run('systemctl', 'enable', unit)
-    helper.check(run, runtime=False)
-    if before != run('nft', '-j', 'list', 'ruleset'):
-        raise ValueError('Runtime changed during boot preparation; retain snapshot/backup and review')
-    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
-    with state.open('x') as stream:
-        json.dump({'prepared_boot_id': boot_id(), 'original_enabled': original, 'backup': str(backup)}, stream)
+    value = {'schema': 2, 'status': 'preparing', 'prepared_boot_id': boot_id(),
+             'original_enabled': original, 'backup': str(backup)}
+    # Durable marker BEFORE the first drop-in/enable operation. A crash or
+    # failed comparison must never look like a safely prepared or clean host.
+    save_boot_state(state, value, exclusive=True)
+    try:
+        for unit in ('nftables', 'fail2ban', 'cron'):
+            folder = Path('/etc/systemd/system') / (unit + '.service.d'); folder.mkdir(exist_ok=True)
+            with (folder / '10-f2b-lab-boot.conf').open('x') as stream:
+                stream.write(nft_dropin if unit == 'nftables' else consumer_dropin)
+        run('systemctl', 'daemon-reload')
+        # Enable only: NO --now, start/restart/reload nftables or global live load.
+        for unit in helper.UNITS: run('systemctl', 'enable', unit)
+        helper.check(run, runtime=False)
+        after = snapshot.capture(run)
+        (backup / 'runtime-after.json').write_text(json.dumps(after, sort_keys=True) + '\n')
+        expired = snapshot.compare(before, after)
+        value.update(status='prepared', naturally_expired=expired)
+        save_boot_state(state, value)
+    except BaseException as error:
+        value.update(status='failed', reason=str(error)[:1000])
+        save_boot_state(state, value)
+        raise
     print('PREPARED, NOT BOOT ACCEPTED: real reboot required, then --check-boot. No live nftables load/start performed.')
 
 
@@ -326,6 +396,8 @@ def check_boot():
     inventory()
     state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
     saved = json.loads(state.read_text())
+    if saved.get('schema') != 2 or saved.get('status') != 'prepared':
+        raise ValueError('Boot preparation incomplete/failed/legacy; retain private backup and restore clean snapshot; no rerun or reboot')
     if saved['prepared_boot_id'] == boot_id(): raise ValueError('Real reboot required since explicit boot preparation')
     boot_helper().check(run)
     print('PASS: post-reboot boot gate; inspect boot journal and both-family enforcement separately; not packet acceptance')

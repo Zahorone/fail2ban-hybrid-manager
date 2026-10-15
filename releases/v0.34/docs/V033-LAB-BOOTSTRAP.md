@@ -146,6 +146,41 @@ or read. Old PHP/action packet semantics are not certified by this lab policy.
 
 ## Mandatory boot preparation and real baseline reboot
 
+### Runtime preservation and partial preparation
+
+Raw nft JSON is NOT compared: expiry values decrease and packet counters increase
+without a policy mutation. The lab guard checks endpoint rule/expression order,
+set schema, unordered membership and element timeout metadata. Known kernel handles
+and metainfo are not policy. Counters may only increase, never reset/decrease.
+Remaining expiry is converted to absolute monotonic-time intervals bounded by each
+snapshot's start/end and nft JSON precision (one second for integer output, one
+millisecond for fractional output, plus 20ms kernel allowance). Sampling windows
+over two seconds are refused. Retiming outside overlapping intervals is refused;
+sub-resolution differences cannot be proven absent and are not claimed detectable.
+A disappearing timed member is accepted only if its latest possible original
+expiry precedes the second sampling window. Permanent/early removals and additions
+are refused. Rule order is never sorted away. Private before/after semantic evidence
+stays only in the root-private preparation backup, never in an archive/CI upload.
+
+Preparation holds upgrade then runtime-sync locks nonblockingly. It never queries
+the Fail2Ban socket under these locks. Cooperative cron/hook writers are excluded;
+legacy direct nft writers and Fail2Ban are not assumed paused or lock-aware. An
+observed concurrent membership/rule change therefore fails closed, without blaming
+preparation or undoing someone else's firewall. Two endpoint snapshots cannot
+prove that no transient writer ran and restored the same state between them. Use
+the quiet disposable baseline; do not weaken the guard for a busy host.
+
+A durable 0600 schema-2 marker is written BEFORE drop-ins/enable operations with
+status `preparing`, original enabled states and the private backup path. Completion
+sets `prepared`; failure sets `failed`; a crash may leave `preparing`. Neither is
+boot acceptance. Check-boot refuses failed/incomplete/legacy state; reruns do not
+adopt or overwrite partial preparation. No automatic unflush/undo/foreign-service
+operation is attempted. Retain the marker and backup privately, do not reboot or
+rerun, and restore a separate clean snapshot. In the older af0bc5a false-failure
+case there may be NO marker despite written drop-ins/enabled states: absence does
+not mean clean. Preserve that evidence VM and repeat from a clean snapshot with
+the new pinned archive; never reconstruct a success marker manually.
+
 Earlier bootstrap prepared runtime only. Disabled nftables loses infrastructure
 after reboot; After= alone does not request its start. Syntax checks and daemon
 restarts are not boot acceptance. Preserve the failed evidence VM and its backup;
