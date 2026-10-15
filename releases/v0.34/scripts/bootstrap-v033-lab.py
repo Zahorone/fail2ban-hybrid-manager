@@ -285,9 +285,17 @@ def prepare_boot(bundle):
     fragment = fragment.resolve(); safe(fragment)
     if not re.search(r'^ExecStart=/usr/sbin/nft -f /etc/nftables.conf\s*$', fragment.read_text(), re.M):
         raise ValueError('Unrecognized vendor nftables ExecStart; no enable attempted')
-    for table in ('fail2ban-filter', 'docker-block'): safe(Path('/etc/nftables.d') / (table + '.nft'))
-    # Check/load syntax only in a new net namespace, never the live firewall.
-    run('unshare', '--net', 'nft', '-c', '-f', '/etc/nftables.conf')
+    for table in ('fail2ban-filter', 'docker-block'):
+        include = Path('/etc/nftables.d') / (table + '.nft'); safe(include)
+        text = re.sub(r'#.*', '', include.read_text())
+        if re.search(r'\b(?:flush|delete|destroy|include|define|reset|import)\b', text):
+            raise ValueError('Unsafe boot include command: ' + str(include))
+    # Validate the full result in a NEW net namespace, never the live firewall.
+    isolated = json.loads(run('unshare', '--net', '/bin/sh', '-ec',
+        'nft -c -f /etc/nftables.conf; nft -f /etc/nftables.conf; nft -j list ruleset'))
+    tables = {(e['table']['family'], e['table']['name']) for e in isolated['nftables'] if 'table' in e}
+    if tables != {('inet', 'fail2ban-filter'), ('inet', 'docker-block')}:
+        raise ValueError('Boot includes declare foreign/missing tables; no enable attempted')
     helper = boot_helper(); original = helper.enabled_states(run)
     if any(state not in {'enabled', 'disabled'} for state in original.values()):
         raise ValueError('Masked/static/custom lab service state requires review')

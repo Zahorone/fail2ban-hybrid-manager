@@ -180,6 +180,15 @@ with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
         run('fail2ban-client', 'set', 'nginx-php-errors', 'unbanip', '192.0.2.18')
         # Namespace simulation only: prepare enables without live nft loading;
         # it MUST NOT report a real reboot acceptance in the same kernel boot.
+        include = Path('/etc/nftables.d/docker-block.nft'); original_include = include.read_bytes()
+        for injection, expected in (('flush ruleset\n', 'Unsafe boot include'),
+                ('table ip synthetic-unowned { }\n', 'foreign/missing tables')):
+            include.write_bytes(injection.encode() + original_include)
+            try: b.prepare_boot(upgrade)
+            except ValueError as error: assert expected in str(error), str(error)
+            else: raise AssertionError('Unsafe boot include was accepted')
+            assert not Path('/etc/systemd/system/nftables.service.d/10-f2b-lab-boot.conf').exists()
+        include.write_bytes(original_include)
         b.prepare_boot(upgrade)
         try: b.check_boot()
         except ValueError as error: assert 'Real reboot required' in str(error)
