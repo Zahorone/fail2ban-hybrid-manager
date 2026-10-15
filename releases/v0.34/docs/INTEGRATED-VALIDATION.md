@@ -32,7 +32,8 @@ explicit. The verifier is read-only and does not certify runtime or networking.
 Historical operator evidence includes ARM64 core fresh/reboot and Docker/NPM
 manual/automatic IPv4+IPv6 checks accumulated across successive hotfixes. Reporting
 presentation and port/diagnostic fixes were separately deployed and checked.
-That is **not** acceptance of this newly assembled archive on one clean VM.
+Those historical results alone are **not** acceptance of a newly assembled
+archive on one clean VM; the exact-receipt evidence below is a separate result.
 
 New archive namespace CI exercises real Fail2Ban/nftables with synthetic fixtures:
 core fresh, log-backed NPM fresh, exact diagnostics/report CLI, scoped ports and
@@ -48,19 +49,65 @@ The original pristine v0.33 has a known invalid percent-format filter on the
 tested Fail2Ban baseline: CI confirms refusal, NOT a successful pristine runtime
 upgrade. Use a valid recognized v0.33 clone; never weaken rollback restart checks.
 
+### Reported real Ubuntu 26.04 ARM64 upgrade/rollback cycle
+
+Generic result supplied by the VM-test task; this documentation task did not
+connect to the VM or independently rerun it. No VM output, configuration, database,
+backup path, hostname, address or email is retained here.
+
+Exact tested product commit: `a2d544444418f1c7cdfefe26593a446216bc3298`.
+Archive SHA256: `e3f2f2845531c98dfba4409afe20e2ff4e861bad80535a53212f4ec285419e7a`.
+Prepared canonical baseline: v0.33-ipv6.1 from lab `aeff5d0`, not pristine v0.33.
+
+- Baseline preflight PASS: exact 10 jails and two documentation-address bans.
+- Apply PASS: 0.34-dev, exact 11 jails; exact sync and Docker union PASS.
+- REAL post-upgrade reboot PASS: nftables/Fail2Ban/cron active and enabled,
+  both documentation bans preserved.
+- NEW explicit rollback CLI PASS without intervention; subsequent READ-ONLY
+  audit PASS for configuration, managed bytes, exact jails, native expiry,
+  infrastructure and foreign rules.
+- REAL restored-baseline reboot PASS: active/enabled units, pong,
+  0.33-ipv6.1, both bans and audit PASS without a legacy enabled-state warning.
+
+This is real boot/runtime evidence for THIS receipt, not namespace simulation.
+It is NOT post-upgrade/rollback packet evidence, Ubuntu 24 amd64 acceptance,
+real-VM fault injection, changed-ticket recovery, reapply or fresh-install
+acceptance. Historical immutable 1964009 rollback CLI remains FAIL; later runtime
+recovery/reboot and the new product's PASS do not erase that result. No release
+promotion or deployment is authorized. Later documentation commits/rebuilt
+archives do not automatically inherit this exact artifact's VM acceptance.
+
 | Gate | Target/evidence | Required result |
 |---|---|---|
 | Offline bundle | exact receipt commit/SHA, inventory, deterministic rebuild | CI + local pass |
 | Core fresh | clean Ubuntu 26 ARM64 Parallels pre-manager snapshot | pending VM |
 | Docker/NPM fresh | separate pre-manager Ubuntu 26 ARM64 clone, real traffic | pending VM |
 | Upgrade/reapply | isolated Ubuntu 24 amd64 clone, valid v0.33 + Docker/UFW fixtures | pending VM |
-| Rollback/fault | same clone + new timed bans after apply | pending VM |
-| Boot persistence | normal reboot after apply and rollback | pending VM |
+| Supplemental ARM64 upgrade/explicit rollback | exact a2d5444 receipt, prepared canonical lab | reported real VM PASS, scope above |
+| Rollback/fault/changed tickets | representative clone; refusal and separately reviewed recovery, never implicit re-add | pending VM/recovery review |
+| Boot persistence | real Ubuntu 26 ARM64 reboot after apply and rollback, exact receipt above | reported PASS; representative Ubuntu 24 amd64 pending |
 | IPv4/IPv6 packets | two independently observed clients, real NPM/Docker traffic | pending VM |
 
-No verified VM connection is assumed. Keep the successful historical VM/snapshots
+This documentation task assumes no VM access. Keep the successful evidence VM/snapshots
 intact. Do not use production or copy its logs/config/DB. Ubuntu 24 -> 26 OS
 upgrade is a different project: this tests manager v0.33 -> 0.34-dev only.
+
+### Remaining consolidation/release plan (not execution authorization)
+
+1. Review/consolidate the syslog, boot-contract, semantic runtime guard and
+   rollback-readiness PR stack, preserving this receipt and the historical FAIL.
+   No automatic merge/release is implied by the evidence update.
+2. Freeze the resulting candidate receipt, rerun complete CI, and assess which
+   real-VM gates must be repeated for its actual changes; do not relabel a new
+   archive as the previously tested one.
+3. Complete the representative Ubuntu 24 amd64 valid-v0.33/Docker/UFW workflow,
+   including upgrade/reapply, explicit/automatic fault rollback and real reboots.
+4. Exercise changed-ticket refusal without data/TTL loss; define and approve any
+   recovery/migration workflow separately. Current fail-closed behavior is not
+   evidence that changed-ticket recovery is implemented or accepted.
+5. Complete real IPv4/IPv6 packet enforcement after BOTH upgrade and rollback,
+   plus the separate clean core/Docker-NPM fresh-install gates. Only then assess
+   canary/RC/final promotion; all remaining gates retain their own evidence.
 
 ## Receive and verify on the disposable VM
 

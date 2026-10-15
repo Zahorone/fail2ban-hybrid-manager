@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import closing
 import datetime as dt
 import fcntl
 import hashlib
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from typing import Iterable
 
 sys.dont_write_bytecode = True
@@ -64,8 +66,8 @@ class UpgradeError(RuntimeError):
     pass
 
 
-def run(*args: str, check: bool = True, input_text: str | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run(args, input=input_text, text=True, capture_output=True)
+def run(*args: str, check: bool = True, input_text: str | None = None, timeout: float | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(args, input=input_text, text=True, capture_output=True, timeout=timeout)
     if check and result.returncode:
         raise UpgradeError(
             f"command failed ({result.returncode}): {' '.join(args)}\n"
@@ -283,9 +285,9 @@ def snapshot_bans() -> dict[str, list[str]]:
     return snapshot
 
 
-def snapshot_ban_times() -> dict:
+def snapshot_ban_times(timeout=None) -> dict:
     # Use typed socket responses via the distribution Python, not CLI cosmetics.
-    output = run("/usr/bin/python3", str(package_root() / "scripts/f2b-ipv6-sync.py"), "export").stdout
+    output = run("/usr/bin/python3", str(package_root() / "scripts/f2b-ipv6-sync.py"), "export", timeout=timeout).stdout
     value = json.loads(output)
     if not isinstance(value, dict): raise UpgradeError("Invalid timed ban snapshot")
     return value
@@ -653,8 +655,8 @@ def create_backup(
 
 
 def backup_sqlite(database: Path, destination: Path) -> None:
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
-        with sqlite3.connect(destination) as target:
+    with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as source:
+        with closing(sqlite3.connect(destination)) as target:
             source.backup(target)
     shutil.copystat(database, destination)
     if os.geteuid() == 0:
@@ -754,6 +756,101 @@ def verify_release_runtime(bans: dict[str, list[str]], before_nft: dict) -> None
     verifier.verify_live(package_root(), bans, before_nft)
 
 
+def native_tickets(database: Path, now: float) -> dict:
+    """Read-only recognized schema; no ticket insert/re-add or TTL correction."""
+    if database.is_symlink() or not database.is_file(): raise UpgradeError('Native rollback database missing/unsafe')
+    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=2)) as connection:
+        if connection.execute('PRAGMA integrity_check').fetchone() != ('ok',):
+            raise UpgradeError('Native rollback database integrity failed')
+        if connection.execute('SELECT version FROM fail2banDb').fetchall() != [(4,)]:
+            raise UpgradeError('Native rollback requires reviewed Fail2Ban DB schema 4')
+        rows = connection.execute('SELECT jail, ip, timeofban, bantime FROM bips').fetchall()
+    result = {}
+    for jail, address, started, duration in rows:
+        if not isinstance(jail, str) or not valid_ip(address) or type(started) is not int or type(duration) is not int or duration < -1:
+            raise UpgradeError('Unrecognized native rollback ticket; no changes made')
+        if duration == -1 or started + duration > now:
+            result.setdefault(jail, {})[address] = None if duration == -1 else started + duration
+    return result
+
+
+def rollback_expectations(backup: Path, compare_live=True) -> tuple[set, dict]:
+    saved_bans = json.loads((backup / 'fail2ban-bans.json').read_text())
+    jails = set(saved_bans)
+    if not jails: raise UpgradeError('Backup has no expected rollback jails')
+    with tempfile.TemporaryDirectory(prefix='f2b-rollback-db-check-') as temporary:
+        database = Path(temporary) / 'native.sqlite3'
+        with tarfile.open(backup / 'system-files.tar') as archive:
+            member = archive.getmember('var/lib/fail2ban/fail2ban.sqlite3')
+            if not member.isfile(): raise UpgradeError('Backup database is not a regular file')
+            with archive.extractfile(member) as source, database.open('xb') as destination:
+                shutil.copyfileobj(source, destination)
+        now = time.time()
+        expected = native_tickets(database, now)
+        if set(expected) - jails: raise UpgradeError('Backup active tickets refer to unavailable rollback jails')
+        saved_times = timed_records(json.loads((backup / 'fail2ban-ban-times.json').read_text()))
+        for jail, addresses in saved_bans.items():
+            for address in addresses:
+                saved = saved_times.get(jail, {}).get(address, 'missing')
+                if saved == 'missing': raise UpgradeError('Backup lacks timed evidence for a saved ban; no changes made')
+                if saved is not None and saved <= now: continue
+                native = expected.get(jail, {}).get(address, 'missing')
+                if (saved is None and native is not None) or (saved is not None and
+                        (type(native) not in {int, float} or abs(saved - native) > 1)):
+                    raise UpgradeError('Backup saved ban lacks matching native DB ticket/expiry; no re-add or changes made')
+        if compare_live and native_tickets(Path('/var/lib/fail2ban/fail2ban.sqlite3'), now) != expected:
+            raise UpgradeError('Rollback refused BEFORE stop: current DB tickets differ from backup (new/revoked/retimed/new-jail ban). '
+                               'No re-add or implicit DB migration is allowed; preserve state/backup for reviewed recovery')
+    return jails, expected
+
+
+def timed_records(records):
+    result = {}
+    for jail, lines in records.items():
+        if not isinstance(lines, list): raise UpgradeError('Invalid native restore response')
+        result[jail] = {}
+        for line in lines:
+            match = re.fullmatch(r'(\S+)\s+(.+?) \+ (-?\d+) = (.+)', line)
+            if not match or not valid_ip(match[1]): raise UpgradeError('Invalid native restore ticket response')
+            result[jail][match[1]] = None if int(match[3]) == -1 else dt.datetime.strptime(match[4], '%Y-%m-%d %H:%M:%S').timestamp()
+    return result
+
+
+def wait_rollback_ready(jails: set, expected: dict, timeout=60):
+    """Read-only bounded socket -> exact jails -> native DB tickets/expiry gate."""
+    deadline = time.monotonic() + timeout
+    phase = 'socket/ping'
+    while time.monotonic() < deadline:
+        try:
+            phase = 'socket/ping'
+            budget = lambda: max(.01, min(3, deadline - time.monotonic()))
+            ping = run('fail2ban-client', 'ping', check=False, timeout=budget())
+            if ping.returncode == 0 and ping.stdout.strip() == 'Server replied: pong':
+                phase = 'exact jail registration'
+                status = run('fail2ban-client', 'status', check=False, timeout=budget())
+                if status.returncode == 0 and set(parse_jails(status.stdout)) == jails:
+                    phase = 'native DB ban restore/absolute expiry'
+                    live = timed_records(snapshot_ban_times(timeout=budget()))
+                    now = time.time()
+                    complete = set(live) == jails
+                    for jail, tickets in expected.items():
+                        for address, expiry in tickets.items():
+                            if expiry is not None and expiry <= now:
+                                complete &= address not in live.get(jail, {})
+                                continue
+                            actual = live.get(jail, {}).get(address, 'missing')
+                            if expiry is None:
+                                complete &= actual is None
+                            else:
+                                complete &= type(actual) in {int, float} and abs(actual - expiry) <= 1
+                    if complete and time.monotonic() <= deadline: return
+        except (subprocess.TimeoutExpired, UpgradeError, ValueError):
+            pass
+        time.sleep(min(.2, max(0, deadline - time.monotonic())))
+    raise UpgradeError('Rollback readiness timeout: ' + phase + '; no banip writes performed. '
+                       'File/DB/firewall restore may already be complete; retain backup and run read-only audit, do not blindly rerun')
+
+
 def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     if not backup.is_dir() or not (backup / "manifest.json").is_file():
         raise UpgradeError(f"Invalid backup directory: {backup}")
@@ -762,22 +859,15 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
     if manifest.get("schema") != 1 or not isinstance(manifest.get("targets"), list) or not isinstance(manifest.get("members"), list):
         raise UpgradeError("Incompatible backup manifest; no rollback changes made")
     mapping = {Path(p): Path(p) for p in manifest["targets"]}
-    bans = json.loads((backup / "fail2ban-bans.json").read_text())
-    # Include bans acquired since preflight wherever the original jail survives.
-    # A removed new jail's bans move to the existing allports fallback jail.
-    try:
-        fresh = snapshot_bans()
-    except UpgradeError:
-        fresh = {}  # Recovery must still work when the daemon is unavailable.
-    fallback = "manualblock" if "manualblock" in bans else "recidive" if "recidive" in bans else None
-    for jail, addresses in fresh.items():
-        destination = jail if jail in bans else fallback
-        if destination is not None:
-            bans[destination] = sorted(set(bans[destination]) | set(addresses))
-        elif addresses:
-            raise UpgradeError("Cannot preserve new jail bans during rollback: " + jail)
+    jails, expected = rollback_expectations(backup)
     # Restoring SQLite files requires stopping Fail2Ban, never Docker/nftables.
     run("systemctl", "stop", "fail2ban")
+    # Recheck after stop to catch tickets committed while shutdown was pending.
+    # On mismatch leave the private backup/live DB intact; do not overwrite it.
+    try: rollback_expectations(backup)
+    except Exception as error:
+        raise UpgradeError('Tickets changed during shutdown: service is stopped but live DB/files were NOT restored/overwritten. '
+                           'Retain state and backup for reviewed recovery; no re-add attempted') from error
     restore_files(backup, mapping)
     for suffix in ("-wal", "-shm"):
         for sidecar in Path("/var/lib/fail2ban").glob("*.sqlite3" + suffix):
@@ -799,12 +889,41 @@ def rollback(backup: Path, mapping: dict[Path, Path] | None = None) -> None:
         commands.append((backup / (table + ".nft")).read_text())
     run("nft", "-f", "-", input_text="\n".join(commands) + "\n")
     run("systemctl", "start", "fail2ban")
-    run("fail2ban-client", "ping")
-    restore_missing_bans(bans)
-    assert_bans_preserved(bans)
+    wait_rollback_ready(jails, expected)
     before = json.loads((backup / "nft-ruleset.json").read_text())
     if external_nft_digest(nft_ruleset()) != external_nft_digest(before):
         raise UpgradeError("Foreign firewall changed during rollback; not automatically overwritten")
+
+
+def audit_rollback(backup: Path):
+    """Read-only completion audit, including backups from immutable 1964009."""
+    verify_backup(backup)
+    jails, expected = rollback_expectations(backup, compare_live=False)
+    run('fail2ban-client', '-t', timeout=10)
+    wait_rollback_ready(jails, expected)
+    with tarfile.open(backup / 'system-files.tar') as archive:
+        members = {member.name: member for member in archive if member.isfile()}
+        for name, member in members.items():
+            if name.startswith(('etc/fail2ban/', 'usr/local/')):
+                path = Path('/') / name
+                if path.is_symlink() or not path.is_file() or path.read_bytes() != archive.extractfile(member).read():
+                    raise UpgradeError('Rollback audit: original configuration/managed bytes differ; retain private evidence')
+        manifest = json.loads((backup / 'manifest.json').read_text())
+        for target in manifest['targets']:
+            if str(Path(target).relative_to('/')) not in members and Path(target).exists():
+                raise UpgradeError('Rollback audit: introduced managed target remains; no cleanup attempted')
+    before = json.loads((backup / 'nft-ruleset.json').read_text())
+    if external_nft_digest(nft_ruleset()) != external_nft_digest(before):
+        raise UpgradeError('Rollback audit: foreign firewall differs; nothing overwritten')
+    validate_live_firewall()
+    check_boot()
+    states = backup / 'unit-enabled-states.json'
+    if states.exists():
+        if boot_contract().enabled_states(run) != json.loads(states.read_text()):
+            raise UpgradeError('Rollback audit: enabled states differ; no repair attempted')
+    else: print('NOT VERIFIED: legacy backup did not record original enabled states; inspect locally')
+    print('PASS: read-only rollback audit (config/managed bytes, exact jails, native ticket expiry, required infrastructure, foreign rules). '
+          'No re-add, no lifecycle change; not reboot/packet acceptance')
 
 
 def validate_dbfile(output):
@@ -873,6 +992,7 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="perform the upgrade after preflight")
     mode.add_argument("--rollback", type=Path, metavar="BACKUP", help="restore a backup created by this tool")
+    mode.add_argument('--audit-rollback', type=Path, metavar='BACKUP', help='read-only completion audit; no rollback or ban writes')
     parser.add_argument("--backup-dir", type=Path, default=Path("/var/backups/f2b-v034"))
     parser.add_argument("--local-review", type=Path, help="private root-only approvals outside this package, bound to its exact commit")
     args = parser.parse_args()
@@ -880,6 +1000,9 @@ def main() -> int:
         require_root()
         root = package_root()
         mapping = install_map(root)
+        if args.audit_rollback:
+            audit_rollback(args.audit_rollback)
+            return 0
         # Mutating modes exclude concurrent upgrades and the new cron job.
         # Dry-run preflight does not create a lock or installed files.
         operation_lock = None
@@ -918,7 +1041,7 @@ def main() -> int:
         print(f"PASS: upgraded to {RELEASE}; backup: {backup}")
         print("Docker and nftables services were not restarted. No nftables ruleset was loaded or flushed.")
         return 0
-    except (OSError, UpgradeError, json.JSONDecodeError) as error:
+    except (OSError, UpgradeError, sqlite3.Error, tarfile.TarError, KeyError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

@@ -120,7 +120,7 @@ automation remains the operator's responsibility. A shell command hidden in an
 external script is not exhaustively audited by this tool.
 
 Runtime checks include real active members and zero-ban lazy action lifecycle.
-Missing bans are restored; records already present retain their DB timings.
+During the STANDARD UPGRADE RELOAD path, missing bans are restored; records already present retain their DB timings.
 When a missing ban must be re-added through Fail2Ban's public API, its jail's
 current bantime is reapplied (expiry may be extended). Original timed records
 are retained as evidence; exact per-IP remaining-time restoration is NOT claimed.
@@ -138,16 +138,18 @@ recovery succeeded. Inspect the error and use console access as needed.
 sudo /usr/bin/python3 scripts/upgrade-v033-v034.py --rollback /EXACT/PRINTED/BACKUP
 ```
 
-Rollback verifies backup checksums, snapshots new bans when the daemon responds,
+Rollback verifies backup checksums and refuses differing active native DB tickets before stop,
 stops Fail2Ban, removes only newly introduced managed files, restores original
 config/DB/helpers/persistence/systemd files, removes stale SQLite WAL/SHM files,
 daemon-reloads systemd, tests configuration, atomically restores ONLY the two
-owned live tables from the backup, starts Fail2Ban and restores missing bans. No
+owned live tables from the backup, starts Fail2Ban and waits for full native DB restoration. No
 full-ruleset backup is ever loaded. Original IPv6 elements and blocked ports are
-included in this scoped firewall recovery. Bans from
-a removed new jail move to an original `manualblock`, otherwise `recidive`.
-If the daemon cannot respond, only the saved snapshot/DB is recoverable; bans
-acquired later may be unavailable. Fail2Ban is briefly stopped. This is not an
+included in this scoped firewall recovery. Active bans from a removed new jail
+require separately reviewed DB migration; no implicit fallback/re-add is performed.
+If the daemon cannot respond, its native DB still must be readable and compatible
+with the backup; differing active tickets require reviewed recovery, not loss or
+re-add. Uncommitted tickets cannot be recovered from a dead daemon by this tool.
+Fail2Ban is briefly stopped. This is not an
 uninterrupted-firewall guarantee. Foreign firewall changes cause a visible
 failure, never an automatic rewrite of the foreign ruleset.
 
@@ -176,3 +178,55 @@ enable nftables. New backups record/restore exact enabled states without --now o
 firewall restart. Legacy backups without that metadata are explicitly identified.
 Namespace systemd simulations are not reboot acceptance. The immutable 1964009
 artifact has not been modified to add this gate.
+# Bounded native rollback readiness and read-only audit
+
+The old immediate post-start ping can fail before the socket exists. That skips
+the old missing-ban restoration/assertion and final foreign-firewall check, even
+if systemd later becomes active and the daemon restores its DB tickets. File/DB
+restoration, sidecar cleanup, daemon-reload, owned-table restoration and the start
+request precede that ping. There was no rollback-complete marker: a lab boot marker
+records boot preparation, NOT rollback success. A later pong/reboot is evidence
+of runtime recovery, not proof that the failed CLI completed all verification.
+
+New explicit and automatic rollback share a 60-second readiness deadline, with
+bounded child commands. They wait for socket/pong, the EXACT original jail set,
+and native DB restoration of still-valid tickets with their original absolute
+expiry (one-second display tolerance). Natural expiry during waiting is allowed;
+missing/permanent/retimed tickets are never re-added to make the test pass.
+Timeout propagates as failure, including automatic rollback double-failure
+reporting. Foreign rules are checked after full readiness; Docker/nftables are
+never restarted or globally loaded. This fixes readiness, not boot/packet acceptance.
+
+This is deliberately conservative, not a new ticket-migration mechanism. A
+read-only schema-4 native DB check compares current active tickets to the rollback
+backup BEFORE stopping Fail2Ban, and requires saved ban/timestamp evidence to be
+represented by native DB tickets. A responding empty daemon cannot pass for lost
+saved bans. New/revoked/retimed/new-jail tickets cause refusal
+without file/DB/firewall restore. The old re-add/new-jail fallback could reset or
+shorten TTL and is NOT retained. A second check after stop catches a shutdown race;
+on mismatch the service is stopped but the live DB/files are not overwritten:
+retain state/backup for reviewed recovery, never blindly retry. Unknown/missing DB
+schemas likewise require review. Original backup/history remains intact; no SQL
+ticket insert/migration or control-plane banip write is performed by rollback.
+
+For the historical early-ping failure, use the NEW verified product archive,
+not the immutable 1964009 script, and the exact old backup path locally:
+
+```sh
+sudo /usr/bin/python3 "$F2B_PRODUCT_ROOT/scripts/upgrade-v033-v034.py" --audit-rollback /EXACT/PRIVATE/BACKUP
+```
+
+Audit verifies backup checksums, original config/managed bytes, absence of introduced
+targets, exact jails/native expiry, infrastructure/boot prerequisites, foreign rules
+and recorded enabled states. It does not stop/start/reload, restore files, create a
+transaction lock or re-add bans. Legacy backups without enabled-state metadata are
+explicitly NOT verified for those original states; inspect locally. Timeout or any
+mismatch is not permission to repair/re-run. Keep all logs, backup paths, DB/config
+and audit detail private. Two asynchronous namespace lifecycle tests do not replace
+real VM tests. Historical Ubuntu 26 ARM64 recovery with immutable 1964009 still
+has failed rollback CLI acceptance. A separate real Ubuntu 26.04 ARM64 cycle with
+exact a2d5444 product receipt now reports explicit rollback CLI, read-only audit
+and subsequent restored-baseline reboot PASS; see the scoped evidence ledger in
+[INTEGRATED-VALIDATION.md](INTEGRATED-VALIDATION.md). It does not accept Ubuntu 24
+amd64, post-upgrade/rollback packets, real-VM fault injection or changed-ticket
+recovery. No immutable 1964009 archive/release is changed.
