@@ -316,6 +316,9 @@ def prepare_boot(bundle):
 
 def _prepare_boot(bundle):
     inventory()
+    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
+    if state.exists():
+        raise ValueError('Preparation marker already exists: retain private backup; no rerun/adoption; restore clean snapshot on failure')
     marker = Path('/etc/f2b/v033-lab.state'); safe(marker)
     if not marker.is_file() or not marker.read_text().startswith('complete;'):
         raise ValueError('Only a complete synthetic baseline can prepare boot')
@@ -363,7 +366,6 @@ def _prepare_boot(bundle):
     print('Private boot-preparation backup:', backup)
     nft_dropin = ('[Unit]\nBefore=fail2ban.service cron.service\n[Service]\nExecStop=\nExecReload=\nExecReload=/bin/false\n')
     consumer_dropin = '[Unit]\nRequires=nftables.service\nAfter=nftables.service\n'
-    state = Path('/etc/f2b/v033-lab-boot.json'); safe(state)
     value = {'schema': 2, 'status': 'preparing', 'prepared_boot_id': boot_id(),
              'original_enabled': original, 'backup': str(backup)}
     # Durable marker BEFORE the first drop-in/enable operation. A crash or

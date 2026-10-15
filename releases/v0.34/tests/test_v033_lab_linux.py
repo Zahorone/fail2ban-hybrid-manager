@@ -33,6 +33,7 @@ def load(name, file):
 
 
 run('mount', '--make-rprivate', '/'); run('mount', '-t', 'tmpfs', '-o', 'mode=0755', 'tmpfs', '/run'); Path('/run/lock').mkdir(mode=0o1777)
+Path('/run/lock').chmod(0o1777)  # Standard sticky lock directory, in our PRIVATE tmpfs only.
 with tempfile.TemporaryDirectory(prefix='f2b-v033-lab-test-') as directory:
     directory = Path(directory)
     for archive_name, folder in (('/tmp/f2b-v033-lab.tar.gz', 'lab'), ('/tmp/f2b-pinned1964/f2b-complete-upgrade.tar.gz', 'upgrade')):
