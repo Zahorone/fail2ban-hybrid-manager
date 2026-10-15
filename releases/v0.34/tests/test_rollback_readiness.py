@@ -32,11 +32,11 @@ def scenario(mode):
     def export(**kwargs):
         exports[0] += 1
         if mode == 'missing' or (mode == 'delayed' and clock[0] < .8): return {'manualblock': [], 'recidive': []}
-        value = record.replace(stamp(1100), stamp(1200)) if mode == 'ttl-reset' else record
+        value = record.replace(stamp(1100), stamp(1200)) if mode in {'ttl-reset', 'expired-rebanned'} else record
         return {'manualblock': [value], 'recidive': []}
     with patch.object(m, 'run', side_effect=run), patch.object(m, 'snapshot_ban_times', side_effect=export), \
             patch.object(m.time, 'monotonic', side_effect=lambda: clock[0]), \
-            patch.object(m.time, 'time', return_value=1050), patch.object(m.time, 'sleep', side_effect=lambda step: clock.__setitem__(0, clock[0] + step)):
+            patch.object(m.time, 'time', return_value=1101 if mode == 'expired-rebanned' else 1050), patch.object(m.time, 'sleep', side_effect=lambda step: clock.__setitem__(0, clock[0] + step)):
         if mode == 'delayed':
             m.wait_rollback_ready(jails, expected, timeout=1.2)
             assert clock[0] >= .8 and exports[0] >= 2
@@ -47,7 +47,7 @@ def scenario(mode):
         assert clock[0] <= 1.2
         assert all('set' not in args for args in calls)
 
-for mode in ('delayed', 'socket', 'jails', 'missing', 'ttl-reset', 'subprocess-timeout'): scenario(mode)
+for mode in ('delayed', 'socket', 'jails', 'missing', 'ttl-reset', 'expired-rebanned', 'subprocess-timeout'): scenario(mode)
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary); database = root / 'native.sqlite3'; backup = root / 'backup'; backup.mkdir()

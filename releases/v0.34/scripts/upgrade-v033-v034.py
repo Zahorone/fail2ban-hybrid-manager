@@ -810,6 +810,7 @@ def wait_rollback_ready(jails: set, expected: dict, timeout=60):
     phase = 'socket/ping'
     while time.monotonic() < deadline:
         try:
+            phase = 'socket/ping'
             budget = lambda: max(.01, min(3, deadline - time.monotonic()))
             ping = run('fail2ban-client', 'ping', check=False, timeout=budget())
             if ping.returncode == 0 and ping.stdout.strip() == 'Server replied: pong':
@@ -822,7 +823,9 @@ def wait_rollback_ready(jails: set, expected: dict, timeout=60):
                     complete = set(live) == jails
                     for jail, tickets in expected.items():
                         for address, expiry in tickets.items():
-                            if expiry is not None and expiry <= now: continue
+                            if expiry is not None and expiry <= now:
+                                complete &= address not in live.get(jail, {})
+                                continue
                             actual = live.get(jail, {}).get(address, 'missing')
                             if expiry is None:
                                 complete &= actual is None

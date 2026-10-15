@@ -146,8 +146,10 @@ owned live tables from the backup, starts Fail2Ban and waits for full native DB 
 full-ruleset backup is ever loaded. Original IPv6 elements and blocked ports are
 included in this scoped firewall recovery. Active bans from a removed new jail
 require separately reviewed DB migration; no implicit fallback/re-add is performed.
-If the daemon cannot respond, only the saved snapshot/DB is recoverable; bans
-acquired later may be unavailable. Fail2Ban is briefly stopped. This is not an
+If the daemon cannot respond, its native DB still must be readable and compatible
+with the backup; differing active tickets require reviewed recovery, not loss or
+re-add. Uncommitted tickets cannot be recovered from a dead daemon by this tool.
+Fail2Ban is briefly stopped. This is not an
 uninterrupted-firewall guarantee. Foreign firewall changes cause a visible
 failure, never an automatic rewrite of the foreign ruleset.
 
