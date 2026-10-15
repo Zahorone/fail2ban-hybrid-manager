@@ -203,3 +203,10 @@ real-log selection and rerun refusal. Linux namespace CI uses real Fail2Ban/
 nftables, dual-family bans and foreign-rule preservation with **simulated
 systemd/cron**. It is not an apt download test or real Ubuntu ARM64 VM/reboot test.
 Complete VM, reboot, external IPv4/IPv6/Docker and canary release gates separately.
+# Boot prerequisite (fail closed)
+
+Current preflight refuses unprepared systemd dependencies or disabled/inactive
+nftables, Fail2Ban or cron. It does not blindly enable a foreign firewall. Review
+and provision that boot contract separately; this conservative installer gate is
+not an automatic boot configurator. Real boot journal/reboot acceptance is mandatory;
+namespace tests with simulated systemctl responses cannot certify boot persistence.

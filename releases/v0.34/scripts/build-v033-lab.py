@@ -27,7 +27,7 @@ def build(output):
     names += ['releases/v0.33/' + p for p in ('config/jail.local', 'scripts/f2b-wrapper-v033.sh',
               'scripts/f2b-docker-hook.sh', 'scripts/f2b-ipv6-sync.py')]
     files = {str(Path('baseline') / Path(name).relative_to('releases/v0.33')): git('show', BASELINE + ':' + name) for name in names}
-    for name in ('scripts/bootstrap-v033-lab.py', 'docs/V033-LAB-BOOTSTRAP.md'):
+    for name in ('scripts/bootstrap-v033-lab.py', 'scripts/boot-contract.py', 'docs/V033-LAB-BOOTSTRAP.md'):
         current = (ROOT / name).read_bytes()
         if current != git('show', 'HEAD:releases/v0.34/' + name): raise ValueError('Uncommitted builder payload')
         files[name] = current

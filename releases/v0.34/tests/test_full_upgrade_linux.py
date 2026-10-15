@@ -171,6 +171,11 @@ with tempfile.TemporaryDirectory(prefix='f2b-full-upgrade-') as temporary:
     stubs.mkdir()
     systemctl = stubs / 'systemctl'
     systemctl.write_text('#!/bin/sh\ncase "$*" in\n'
+        'show*--property=UnitFileState*) echo enabled;;\n'
+        'show*--property=NeedDaemonReload*) echo no;;\n'
+        'show*--property=ActiveState*) echo active;;\n'
+        'show*--property=Requires*|show*--property=After*) echo nftables.service;;\n'
+        'show*--property=ExecStart*) echo "/usr/sbin/nft -f /etc/nftables.conf";;\n'
         '"stop fail2ban") exec fail2ban-client stop;;\n'
         '"start fail2ban") exec fail2ban-client -x start;;\n'
         '"daemon-reload"|"is-active --quiet cron") exit 0;;\n'

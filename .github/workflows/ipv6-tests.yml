@@ -28,7 +28,9 @@ jobs:
       - name: Static release safety
         run: /usr/bin/python3 releases/v0.34/tests/test_release_static.py
       - name: Fresh-install prerequisites and stock-bootstrap contracts
-        run: /usr/bin/python3 releases/v0.34/tests/test_fresh_install.py
+        run: |
+          /usr/bin/python3 releases/v0.34/tests/test_fresh_install.py
+          /usr/bin/python3 releases/v0.34/tests/test_boot_contract.py
       - name: Disposable Docker/NPM lab config (no containers started)
         run: /usr/bin/python3 releases/v0.34/tests/test_docker_npm_lab.py --require-compose
       - name: Wrapper regression tests

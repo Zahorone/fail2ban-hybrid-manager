@@ -346,6 +346,8 @@ def main():
         platform_check()
         file_guards()
         dependencies(args)
+        try: load_upgrade().boot_contract().check(run, infra=False)
+        except ValueError as error: raise FreshError(str(error)) from error
         before = nft_preflight()
         selected = policy(args)
         print('Selected jails:', ', '.join(selected[1]))

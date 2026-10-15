@@ -66,6 +66,11 @@ with tempfile.TemporaryDirectory(prefix='f2b-fresh-linux-') as temporary:
     stubs = temporary / 'bin'
     stubs.mkdir()
     (stubs / 'systemctl').write_text('#!/bin/sh\ncase "$*" in\n'
+        'show*--property=UnitFileState*) echo enabled;;\n'
+        'show*--property=NeedDaemonReload*) echo no;;\n'
+        'show*--property=ActiveState*) echo active;;\n'
+        'show*--property=Requires*|show*--property=After*) echo nftables.service;;\n'
+        'show*--property=ExecStart*) echo "/usr/sbin/nft -f /etc/nftables.conf";;\n'
         '"stop fail2ban") fail2ban-client stop >/dev/null 2>&1; exit 0;;\n'
         '"enable --now fail2ban") (sleep 1; fail2ban-client -x start) >/dev/null 2>&1 & exit 0;;\n'
         '"is-active --quiet fail2ban") exec fail2ban-client ping >/dev/null 2>&1;;\n'
