@@ -35,8 +35,34 @@ real preflight before and after upgrade/rollback and restarts the restored basel
 `/etc/fail2ban/action.d/sendmail-whois-lines.local` changes only the lab transport
 and whois helper; it does not replace actionban/evidence grep or any detection
 filter. PHP retains actual `grepopts=-a -m <grepmax>`, as required by the pinned
-upgrade validator. The root-private local sink is `/var/log/f2b-v033-lab-mail.log`.
+upgrade validator. The root-private local sink is `/var/lib/f2b-v033-lab/logs/mail.log`
+(both private directories are root-owned 0700, sink 0600).
 It is never archived/uploaded. Both explicit local files survive upgrade/rollback.
+
+### System log trust boundary
+
+The generic strict path validator is unchanged in scope: root ownership, no
+symlinks and no group/world writes. Only canonical log handling separately accepts
+the exact distro `/var/log` directory as root:syslog 0775 (or strict root-owned
+non-writable layout). No chmod/chown of system `/var/log` is performed. Unexpected
+owners/groups, world writes, symlink parents and non-regular/multiply-linked log
+files are refused with the offending path and reason. Existing root-owned,
+non-group/world-writable distribution `fail2ban.log` is opened without following
+symlinks, inode-checked, and preserved without reading, truncating or changing its
+metadata. Other canonical output files must be absent. New files are created 0600
+through the pinned directory descriptor with O_NOFOLLOW and O_EXCL; a file planted
+between check and creation causes refusal, never truncation or symlink traversal.
+
+This explicitly trusts the system syslog principal, not arbitrary writable
+parents. Syslog can replace entries in a non-sticky 0775 directory even when files
+are root-owned. Canonical wrapper/hook and Fail2Ban continue opening their standard
+log paths at runtime; these managed bytes cannot be changed while testing the
+pinned upgrade. This lab is NOT isolation against a compromised syslog account or
+concurrent hostile writers. Do not apply if that system principal is untrusted;
+use the clean VM snapshot instead. The lab-only mail sink avoids that boundary
+entirely under strict `/var/lib` ancestors. CI exercises the syslog layout plus
+owner/mode/symlink/hardlink and insertion-race refusals, then the same real daemon
+upgrade/rollback sequence; it does not certify real ARM64/Ubuntu26 execution.
 
 ## Transfer two independently verified artifacts
 

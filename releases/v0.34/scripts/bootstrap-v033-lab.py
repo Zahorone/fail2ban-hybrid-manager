@@ -3,6 +3,7 @@
 import argparse
 import configparser
 import hashlib
+import grp
 import importlib.util
 import io
 import json
@@ -18,10 +19,12 @@ import time
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = '196400970b669f8fd43eebadad3b971125de857e'
+PRIVATE_LOGS = Path('/var/lib/f2b-v033-lab/logs')
+CANONICAL_LOGS = ('fail2ban.log', 'fail2ban-blocked-ips.txt', 'f2b-docker-sync.log', 'f2b-wrapper.log')
 MAIL_SINK = ('# Synthetic lab only: preserve the real binary-safe mail action,\n'
              '# but consume its output locally and never query external whois.\n'
              '[Definition]\n_whois_command = printf %%b "Synthetic lab: external whois disabled\\n"\n'
-             '[Init]\nmailcmd = /bin/cat >> /var/log/f2b-v033-lab-mail.log\n')
+             '[Init]\nmailcmd = /bin/cat >> /var/lib/f2b-v033-lab/logs/mail.log\n')
 
 
 def run(*parts):
@@ -82,7 +85,65 @@ def safe(target):
     for path in (target, *target.parents):
         if not path.exists() and not path.is_symlink(): continue
         info = path.lstat()
-        if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022: raise ValueError('Unsafe lab target/parent')
+        check_node(path, info)
+
+
+def check_node(path, info, syslog_parent=False):
+    reason = None
+    if stat.S_ISLNK(info.st_mode): reason = 'symlink'
+    elif info.st_uid != 0: reason = 'owner is not root'
+    elif info.st_mode & 0o002: reason = 'world-writable'
+    elif info.st_mode & 0o020:
+        try: syslog_gid = grp.getgrnam('syslog').gr_gid
+        except KeyError: syslog_gid = None
+        if not (syslog_parent and path == Path('/var/log') and stat.S_ISDIR(info.st_mode)
+                and info.st_gid == syslog_gid and stat.S_IMODE(info.st_mode) == 0o775):
+            reason = 'group-writable outside trusted root:syslog 0775 /var/log'
+    if reason: raise ValueError('Unsafe lab target/parent: ' + str(path) + ': ' + reason)
+
+
+def log_directory():
+    # Deliberately separate from safe(): only this exact distro directory may
+    # trust syslog. Pin each ancestor with O_NOFOLLOW, including the final one.
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part, path in (('var', Path('/var')), ('log', Path('/var/log'))):
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = next_fd
+            check_node(path, os.fstat(fd), syslog_parent=True)
+        return fd
+    except Exception as error:
+        os.close(fd)
+        raise ValueError('Unsafe log directory /var/log: ' + str(error)) from error
+
+
+def canonical_logs(create=False):
+    fd = log_directory()
+    try:
+        for name in CANONICAL_LOGS:
+            path = Path('/var/log') / name
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create: continue
+                # Never follow/truncate a file inserted since preflight.
+                child = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                0o600, dir_fd=fd)
+            else:
+                check_node(path, info)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError('Unsafe lab log: ' + str(path) + ': expected single-link regular file')
+                if name != 'fail2ban.log':
+                    raise ValueError('Synthetic lab refuses existing traffic/output: ' + str(path))
+                # Preserve an existing distribution Fail2Ban log without reading
+                # or truncating it; verify the opened inode against lstat.
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                opened = os.fstat(child)
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    os.close(child)
+                    raise ValueError('Unsafe lab log: ' + str(path) + ': replaced during validation')
+            os.close(child)
+    finally: os.close(fd)
 
 
 def preflight(bundle):
@@ -97,8 +158,7 @@ def preflight(bundle):
     foreign = fresh.nft_preflight()
     written = ('/etc/fail2ban/jail.d/zz-v033-lab.local', '/etc/f2b/v033-lab.state',
                '/etc/nftables.conf', '/etc/nftables.d/fail2ban-filter.nft', '/etc/nftables.d/docker-block.nft',
-               '/etc/fail2ban/action.d/sendmail-whois-lines.local', '/var/log/f2b-v033-lab-mail.log',
-               '/var/log/fail2ban.log', '/var/log/fail2ban-blocked-ips.txt', '/var/log/f2b-docker-sync.log', '/var/log/f2b-wrapper.log')
+               '/etc/fail2ban/action.d/sendmail-whois-lines.local', str(PRIVATE_LOGS / 'mail.log'))
     for name in written:
         target = Path(name); safe(target)
         if target.exists() and not target.is_file(): raise ValueError('Expected regular lab output target')
@@ -109,7 +169,8 @@ def preflight(bundle):
             if not stock or hashlib.md5(target.read_bytes()).hexdigest() != stock: raise ValueError('Not a clean managed target: ' + str(target))
         if str(target) in package['known_targets'] and hashlib.sha256(source.read_bytes()).hexdigest() not in package['known_targets'][str(target)]:
             raise ValueError('Canonical v0.33 component not recognized by pinned upgrade: ' + str(target))
-    for name in ('/var/log/fail2ban-blocked-ips.txt', '/opt/rustnpm/data/logs'):
+    canonical_logs()
+    for name in ('/var/lib/f2b-v033-lab', '/opt/rustnpm/data/logs'):
         path = Path(name); safe(path)
         if path.exists(): raise ValueError('Synthetic lab refuses existing traffic source: ' + name)
     policy, enabled = lab_policy()
@@ -162,11 +223,13 @@ def apply(bundle):
         target.chmod(0o755 if str(target).startswith('/usr/local/') else 0o644)
     Path('/etc/fail2ban/jail.d/zz-v033-lab.local').write_text(policy)
     Path('/etc/fail2ban/action.d/sendmail-whois-lines.local').write_text(MAIL_SINK)
-    Path('/var/log/f2b-v033-lab-mail.log').touch(mode=0o600)
+    PRIVATE_LOGS.parent.mkdir(mode=0o700)
+    PRIVATE_LOGS.mkdir(mode=0o700)
+    with (PRIVATE_LOGS / 'mail.log').open('x') as stream: os.fchmod(stream.fileno(), 0o600)
     Path('/opt/rustnpm/data/logs').mkdir(parents=True)
     for name in ('fallback_access.log', 'fallback_http_access.log', 'fallback_error.log', 'proxy-host-1_access.log', 'proxy-host-1_error.log'):
         (Path('/opt/rustnpm/data/logs') / name).touch()
-    for name in ('fail2ban.log', 'fail2ban-blocked-ips.txt', 'f2b-docker-sync.log', 'f2b-wrapper.log'): (Path('/var/log') / name).touch()
+    canonical_logs(create=True)
     with tempfile.NamedTemporaryFile(mode='w', prefix='f2b-v033-owned-', suffix='.nft') as source:
         source.write(owned_commands()); source.flush(); run('nft', '-f', source.name)
     Path('/etc/nftables.d').mkdir(exist_ok=True)
